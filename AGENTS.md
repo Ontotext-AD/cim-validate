@@ -1,8 +1,15 @@
 # AGENTS.md — ReliCapGrid SHACL evaluation dashboard
 
-This repository holds SHACL validation reports for **ReliCapGrid ENTSO-E** test data
-against CGMES and NCP Application-Profile shapes, plus scripts that turn those
-reports into a static HTML dashboard.
+This repository validates **ReliCapGrid ENTSO-E** test data against CGMES and
+NCP Application-Profile shapes, stores every validation run in a GraphDB named
+graph, and turns the latest run of each SHACL file into a static HTML
+dashboard.
+
+There is exactly **one pipeline and one dashboard**. `validate-all-and-write-to-gdb.sh`
+validates, records, prunes, and rebuilds; `index.html` + `dashboard/` are the
+only generated site. Validation runs are never written to disk as
+`validation-report.ttl` / `timing.txt` files — the earlier file-based pipeline
+is retired and git-ignored (see *Retired file-based pipeline*).
 
 Agents working here should read this file first, then `README.md` for user-facing
 documentation.
@@ -12,12 +19,13 @@ documentation.
 | Layer | Technology |
 |-------|------------|
 | Validation | GraphDB SHACL validation API (`relicapgrid` on localhost:7200) |
-| Report format | Turtle (`validation-report.ttl` per profile folder) |
-| Build language | Python 3.10+ (stdlib only — no `requirements.txt`) |
-| Batch orchestration | Bash (`validate-all.sh`, `continue-validate.sh`) |
+| Run storage | GraphDB named graph `…/SHACL/reports` in repository `cim-shacl` |
+| Build language | Python 3.10+ (stdlib only, except the writer — see below) |
+| Writer dependencies | `rdflib` + `requests` (`requirements.txt`), used only by `write-validation-run-to-gdb.py` |
+| Batch orchestration | Bash (`validate-all-and-write-to-gdb.sh`) |
 | Dashboard output | Static HTML + CSS + small inline JavaScript |
 | Styling | `dashboard.css` — Prime/Bootstrap design tokens, Rubik font, gray ground, white cards |
-| Hosting | GitHub Pages (`index.html` at repo root) |
+| Hosting | GitHub Pages, deploying the committed `index.html` + `dashboard/` |
 | External repos | [`entsoe/application-profiles-library`](https://github.com/entsoe/application-profiles-library) (SHACL shapes), [`entsoe/relicapgrid`](https://github.com/entsoe/relicapgrid) (instance data) |
 | GraphDB links | Resource explorer + SPARQL presence lookup; GraphDB link omitted when IRI absent |
 
@@ -28,54 +36,133 @@ spot-checking generated HTML.
 
 ```
 relicap-ap-shacl-eval/
-├── <PROFILE-SHACL>/              # one folder per validated SHACL file
-│   ├── validation-report.ttl     # GraphDB SHACL report (or parser error text)
-│   └── timing.txt                # http_status, duration_seconds, finished_at
-├── dashboard-config.json         # source repositories/families and link config
-├── dashboard_config.py           # config validation + PROF catalog
-├── build_dashboard.py            # stable dashboard entry point
+├── validate-all-and-write-to-gdb.sh  # THE pipeline: validate → record → prune → build
+├── write-validation-run-to-gdb.py    # one run (report + timing) -> GraphDB named graph
+├── gdb_history.py                # retention window for that graph + standalone pruner
+├── gdb_source.py                 # SPARQL reader for the GraphDB validation-history graph
+├── build_dashboard_gdb.py        # dashboard entry point + run-history page
 ├── cube_dashboard.py             # cube metrics + page generator
-├── collect-results.py            # CSV export + calls build_dashboard
-├── collect-timings.py            # timing parsing/formatting + history refresh
+├── dashboard_config.py           # config validation + PROF catalog
+├── dashboard-config.json         # source repositories/families, history graph, link config
+├── collect-results.py            # library: IRI shortening, SHACL index, GitHub/GraphDB links
+├── collect-timings.py            # library: format_duration()
 ├── dashboard.css                 # shared styles (referenced with relative paths)
-├── dashboard/                    # generated drill-down pages (safe to delete/rebuild)
-│   └── r/<REPOSITORY>/
-│       ├── m/<METRIC>/           # family ranking for one measure
-│       └── f/<FAMILY>/
-│           ├── m/<METRIC>/       # ontology-profile ranking
-│           └── p/<PROFILE>/
-│               ├── m/<METRIC>/   # individual-shape ranking
-│               └── s/<SHAPE>/    # source grounding + focus-node evidence
-├── index.html                    # landing dashboard (generated)
-├── validation-results.csv        # flat export (capped per constraint)
-├── validation-results.html       # redirect stub → index.html
-├── validate-all.sh               # full batch validation + report generation
-├── continue-validate.sh          # resume partial batch
-└── batch.log                     # validation run log
+├── validation-result-model.ttl   # the shape of what the writer puts in the graph
+├── index.html                    # landing dashboard (generated, committed)
+└── dashboard/                    # generated drill-down pages (committed; safe to rebuild)
+    ├── cube.json                 # whole cube, one machine-readable artifact
+    ├── runs/                     # run history with per-file Δ against the previous run
+    ├── all/rows.json             # sort payload for the landing page
+    ├── all/m/execution_err/      # run-level execution-error evidence
+    └── r/<REPOSITORY>/
+        ├── rows.json             # sort payload, one per scope that has children
+        ├── m/execution_err/
+        └── f/<FAMILY>/
+            ├── rows.json
+            ├── m/execution_err/
+            └── p/<PROFILE>/
+                ├── rows.json
+                └── s/<SHAPE>/    # source grounding + focus-node evidence
 ```
 
-Each profile folder name matches its SHACL filename without extension
-(`Equipment-AP-Con-Simple-SHACL/` ⇄ `…/SHACL/Equipment-AP-Con-Simple-SHACL.ttl`).
+`collect-results.py` and `collect-timings.py` are **libraries, not pipeline
+steps**. They are loaded by filename from `cube_dashboard.py` and no longer
+have a `main()`; never add one back and never invoke them from a script. They
+read no validation report and no timing file.
 
-Source checkouts and evaluation-result roots are declared in
-`dashboard-config.json`; paths are resolved relative to this repository.
+Source checkouts are declared in `dashboard-config.json`; paths are resolved
+relative to this repository.
+
+### Retired file-based pipeline
+
+These are git-ignored and must not be re-added, re-run, or referenced from new
+code: `validate-all.sh`, `continue-validate.sh`, `build_dashboard.py`,
+`upload-results.py`, the per-profile `*-SHACL/` folders with their
+`validation-report.ttl` / `timing.txt`, `.timing-history.json`,
+`validation-results.csv`, `validation-results.html`, and `batch*.log`. They may
+still exist in a working copy; they are not part of the project.
 
 ## Architecture patterns
 
 ### Static site generation
 
 The dashboard is fully pre-rendered HTML. There is no server-side runtime.
-`build_dashboard.py` delegates to `cube_dashboard.py`, which:
+`build_dashboard_gdb.py` delegates to `cube_dashboard.py`, which:
 
 1. Deletes and recreates `dashboard/`.
 2. Loads configured repositories/families and PROF-derived profile mappings.
-3. Parses each validation report and each declared SHACL shape.
+3. Reads each run from the injected source and parses each declared SHACL shape.
 4. Builds individual-shape leaves and rolls them up through ontology profile,
    family, repository, and global scopes.
 5. Asserts validation sums and unique timing-run identities at every boundary.
 6. Queries GraphDB (SPARQL) to decide focus-node link targets and writes pages.
 
 Keep pages small: paginate large evidence tables at 1,500 rows.
+
+### Hybrid rendering: pre-rendered pages, client-side ordering
+
+Presentation state that used to be materialised as files is now computed in the
+browser. Pre-render the hierarchy and the evidence; do **not** pre-render sort
+orders.
+
+- `write_rows_json()` emits a `rows.json` sidecar next to every scope page that
+  has children: one compact array per child row (`ROW_COLUMNS`), carrying both
+  the numeric value and the pre-formatted display string for each measure, so
+  the browser never reimplements `ct.format_duration()`.
+- `SORT_SCRIPT` fetches that sidecar **lazily on the first sort**, sorts the
+  whole child set, re-renders `<tbody>`, and rewrites the `[data-pager]` slots
+  with hash-based page links. The default view issues no extra request.
+- Sort state lives in the URL fragment
+  (`#sort=<metric>&dir=<asc|desc>&page=<n>`) so sorted views stay shareable and
+  reproducible. `readHash()` is the single source of truth; header clicks only
+  set `location.hash` and let `hashchange` re-render.
+- Header clicks cycle descending → ascending → default; the default restores the
+  captured original `<tbody>` HTML, so it is byte-identical to the static page.
+- Rows sort across the whole scope, not just the current static page. Sorting
+  must stay correct on profiles large enough to paginate (one exceeds 7,000
+  shapes).
+- Degradation is mandatory: no JavaScript, an old browser without `fetch`, or a
+  failed sidecar request must leave the pre-rendered tables and their
+  `p<n>.html` pages fully usable.
+- `write_cube_json()` emits `dashboard/cube.json`, the whole cube as one
+  artifact for cross-cutting questions. No page reads it. Shape entries omit
+  `page` because it is always the parent profile's page directory plus
+  `s/<id>/index.html`, and spelling out 13k long paths costs more than the rest
+  of the file.
+
+Any new measure must be free: add it to `METRICS` and `ROW_COLUMNS`, not to a
+new tree of generated pages.
+
+### The run source is injected, not hardcoded
+
+`cube_dashboard.build()` takes a **required** `collect` callable
+(`(catalog, index) -> list[run]`) plus optional `dash_dir`, `index_path`, and
+`source_note`. The cube itself knows nothing about where runs come from, so a
+new source supplies runs and output paths — never a forked copy of the cube or
+the page generators. `build()` cannot be called without a source; there is no
+file-based fallback to drop back to.
+
+`build_dashboard_gdb.py` is the only source: `gdb_source.py` reads runs from
+the GraphDB validation-history graph and the entry point maps them onto
+catalog sources, reusing `parse_shapes()`, `result_item()`, and
+`iris_present_in_graphdb()`. It writes `index.html` + `dashboard/`, taken from
+`validation_history.index` / `.dashboard_dir` in `dashboard-config.json`.
+
+The history graph keeps the last two runs per SHACL file (see *History
+retention*); the cube uses the **latest run per file**, or the latest at or
+before `--as-of`. `gdb_source.link_previous()` attaches the preceding run's
+timing to each run, which is what the run-history Δ column and the landing
+comparison line report. A configured SHACL file with no run in the graph counts
+as one validation execution error. Run metadata is resolved from the
+`sh:ValidationReport` node, falling back to a metadata-bearing `sh:result` node
+(how the retired `upload-results.py` wrote it); reports with no `ex:file`
+anywhere are excluded and counted in the landing frontmatter.
+
+When adding a run source, keep `run_meta()`'s keys (`exists`, `turtle`,
+`conforms`, `truncated`, `execution_error`, `error_text`) and feed
+`result_item()` Turtle-shaped terms — `gdb_source.term_to_turtle()` shows the
+required escaping, including ASCII-only literals because
+`collect-results.py` unescapes with `unicode_escape`.
 
 ### Module loading
 
@@ -87,7 +174,8 @@ ct = _load("collect_timings", "collect-timings.py")
 ```
 
 Reuse helpers from `collect-results.py` and `collect-timings.py` rather than
-duplicating parsing or link logic.
+duplicating IRI, link, or formatting logic. Both are library-only: they expose
+no `main()` and are never executed as a pipeline step.
 
 ### Hierarchical navigation
 
@@ -99,8 +187,8 @@ index.html
                     └── s/<INDIVIDUAL-SHAPE>/index.html
 ```
 
-- Each non-zero aggregate measure links to `m/<METRIC>/index.html`, where the
-  next-level rows are sorted by that measure.
+- Each non-zero aggregate measure links to the next level down with
+  `#sort=<METRIC>`, which loads that page already ordered by the measure.
 - Ontology-profile frontmatter links the mapped RDFS artifact on GitHub.
 - Individual-shape frontmatter links the exact SHACL declaration line.
 - Shape error/warning counts link to focus-node evidence; distinct/good/total
@@ -126,10 +214,11 @@ exclusive. Timing sum/max uses the set of unique SHACL-file runs attached to a
 scope, so shared shapes never multiply runtime. Shape pages repeat the containing
 file-run time as non-additive context until per-shape SPARQL timings are available.
 
-**Validation execution errors** counts unique runs whose
-`validation-report.ttl` is not a SHACL `sh:ValidationReport`, including empty
-or missing response files. It is a run-level measure, not a shape-level measure,
-and is shown only in landing, repository, and family frontmatter.
+**Validation execution errors** counts unique runs that produced no SHACL
+`sh:ValidationReport`: a run recorded with `ex:executionError true`, or a
+configured SHACL file with no run in the graph at all. It is a run-level
+measure, not a shape-level measure, and is shown only in landing, repository,
+and family frontmatter.
 
 ### Focus-node link resolution
 
@@ -156,41 +245,85 @@ never duplicate its validation measures across ontology profiles.
 
 ## Build commands
 
-### Regenerate dashboard only (most common for agents)
+### Regenerate the dashboard only (most common for agents)
 
-Requires network access to GraphDB for focus-node presence lookup:
-
-```bash
-python3 build_dashboard.py
-```
-
-Or via the collect pipeline (also refreshes CSV):
+Requires the local GraphDB with the validation-history graph populated, both
+to read the runs and for the focus-node presence lookup:
 
 ```bash
-python3 collect-results.py
+python3 build_dashboard_gdb.py
+python3 build_dashboard_gdb.py --as-of 2026-09-20T00:00:00+03:00
+python3 gdb_source.py            # list the recorded runs without writing pages
 ```
 
-Refresh timing history only:
+This rewrites `index.html` and `dashboard/` in place. Nothing else generates
+pages; there is no CSV step and no timing-history step.
 
-```bash
-python3 collect-timings.py
-```
-
-### Full validation batch (requires GraphDB credentials)
+### Full pipeline (requires GraphDB credentials)
 
 ```bash
 export GDBUSER=<username>
 export GDBPASS=<password>
-./validate-all.sh
+./validate-all-and-write-to-gdb.sh
 ```
 
-This validates every SHACL file, writes per-profile reports, refreshes timing
-history, then runs `collect-results.py` and `build_dashboard.py`.
+One script, four stages: validate every SHACL file against `relicapgrid`,
+append each response to the history graph via
+`write-validation-run-to-gdb.py` (rdflib + requests), re-apply the retention
+window with `gdb_history.py`, then rebuild the dashboard with
+`build_dashboard_gdb.py`. No report or timing files are written to disk.
 
-Resume a partial batch:
+The graph is never dropped, so each SHACL file gets one more
+`sh:ValidationReport` node per run, tagged `ex:file` / `ex:finishedAt` /
+`ex:durationSeconds` / `ex:httpStatus`, with the `sh:ValidationResult` nodes
+valid at that time. Non-report responses are stored with `ex:executionError
+true` and `ex:errorText`. Destination overrides: `GDB_HISTORY_REPOSITORY`,
+`GDB_HISTORY_GRAPH`, `GDB_BASE_URL`.
+
+There is no resume script. The batch is re-runnable: re-running appends fresh
+runs and retention discards what falls outside the window.
+
+### History retention
+
+The graph is bounded, not unbounded. `gdb_history.py` keeps, per SHACL file:
+
+- the **last `keep_timings` runs** (default 2) — enough to show the current
+  run and how it differs from the one before it;
+- `sh:result` nodes on the **newest `keep_results` runs** only (default 1) —
+  older runs keep `ex:finishedAt` / `ex:durationSeconds` / `ex:httpStatus` and
+  report no results.
+
+Window sizes come from `validation_history.keep_timings` /
+`keep_results` in `dashboard-config.json`.
+
+`write-validation-run-to-gdb.py` calls `gdb_history.prune_file()` for the file
+it just wrote, so the window is an invariant of the write path rather than a
+cleanup job (`--no-prune` opts out). A prune failure is a warning, not an
+error: the run is already recorded correctly, and the batch script re-applies
+the window over the whole graph at the end.
 
 ```bash
-./continue-validate.sh
+python3 gdb_history.py --dry-run    # report graph size and the window
+python3 gdb_history.py              # apply it everywhere (idempotent)
+python3 gdb_history.py --file Equipment-AP-Con-Simple-SHACL.ttl
+```
+
+`prune_file()` normalizes before it prunes: runs written by the retired
+`upload-results.py` (and the first version of the writer) carry their metadata
+on a `sh:ValidationResult` node instead of the report, which makes them
+invisible to a window query keyed on `?report ex:file`. Normalization lifts
+`ex:*` metadata onto the report node so every run is inside the window.
+
+Pruning is ordering-driven, so a report with no `ex:finishedAt` is never
+selected for deletion.
+
+**Back up before widening or narrowing the window** — deletion is not
+reversible:
+
+```bash
+curl -s -H 'Accept: application/n-quads' \
+  'http://localhost:7200/repositories/cim-shacl/statements?context=%3Chttps%3A%2F%2Fgithub.com%2Fentsoe%2Fapplication-profiles%2FSHACL%2Freports%3E' \
+  -o history-backup.nq
 ```
 
 ### Local preview
@@ -212,7 +345,9 @@ python3 -m http.server 8765 --bind 127.0.0.1
   correctly.
 - CSS href: `css_href(from_dir)` — depth-relative path to root `dashboard.css`.
 - Wrap tables in `<div class="table-wrap">` for resize support.
-- **Zero counts render as empty cells**, not `"0"` (`count_cell()`).
+- **Zero counts render as empty cells**, not `"0"` (`count_cell()`). `SORT_SCRIPT`
+  re-renders rows in the browser, so any change to cell rendering must be made
+  in both `cube_table()` and the script's `cellHtml()`/`rowHtml()`.
 - **Icons in column headers only** (red circle = Violation, yellow triangle =
   Warning, green circle = Good). Cells contain clickable numbers, not icons.
 - **Column alignment**: numeric columns centered (`.num.cell`); repository,
@@ -233,19 +368,28 @@ GraphDB when present; GitHub is a separate column.
 
 ### Client-side behaviour
 
-`TABLE_SCRIPT` adds column drag handles on `.table-wrap`. Metric ordering is
-pre-rendered into `m/<METRIC>/index.html` rather than relying on JavaScript.
+Two independent inline scripts, both vanilla and dependency-free:
+
+- `TABLE_SCRIPT` adds column drag handles on `.table-wrap`. Emitted whenever the
+  body contains a `<table>`.
+- `SORT_SCRIPT` drives column sorting. Emitted only when the body contains
+  `data-rows`, so evidence and shape pages stay script-light.
+
+Sortable headers carry `class="sortable" data-sort="<metric>"`; the active one
+gets `data-dir`, and the arrow is a CSS `::after`. The sort handler ignores
+clicks landing on a `.col-resize` grip so resizing never triggers a sort.
+
+Keep both scripts framework-free and inline. Do not add npm, a bundler, or a
+lockfile — the project is stdlib-Python plus hand-written CSS and JS.
 
 ### Configuration
 
 Edit `dashboard-config.json` for shape repositories, local checkouts, GitHub
-repository/ref, evaluation-result roots, families, SHACL/RDFS/PROF directories,
-and optional SHACL-file-to-profile overrides. Families and repositories are
-extensible lists. Data snapshot, GraphDB, and instance GitHub settings live in
-the top-level `data` object.
-
-`MAX_PER_CONSTRAINT` in `collect-results.py` only controls the CSV row cap;
-dashboard counts are not capped by it.
+repository/ref, families, SHACL/RDFS/PROF directories, and optional
+SHACL-file-to-profile overrides. Families and repositories are extensible
+lists. GraphDB and instance GitHub settings live in the top-level `data`
+object; the history graph, published output paths, and retention window live
+in `validation_history`.
 
 ### Source report limits
 
@@ -256,17 +400,23 @@ as exact.
 
 ### Validation execution errors
 
-GraphDB error responses are stored as text in `validation-report.ttl`. Any
-response that is not a SHACL `sh:ValidationReport`, including an empty or missing
-file, contributes one run-level **Validation execution errors** count and appears
-on the tile's evidence page with its SHACL file, HTTP status, and returned text.
-It contributes no SHACL result rows.
+GraphDB error responses are recorded in the history graph as a report with
+`ex:executionError true` and the returned text in `ex:errorText`. That, and a
+configured SHACL file with no run in the graph, each contribute one run-level
+**Validation execution errors** count and appear on the tile's evidence page
+with the SHACL file, HTTP status, and returned text. They contribute no SHACL
+result rows.
 
 ### Do not
 
 - Commit secrets (`GDBUSER`, `GDBPASS`).
-- Add third-party Python dependencies without explicit user request (project uses
-  stdlib only).
+- Add third-party Python dependencies without explicit user request. Only
+  `write-validation-run-to-gdb.py` may use `rdflib`/`requests`; everything the
+  dashboard build touches is stdlib.
+- Reintroduce a file-based run source. Runs come from the GraphDB history
+  graph; `cube_dashboard.build()` has no default collector on purpose.
+- Give `collect-results.py` or `collect-timings.py` a `main()`, or call them
+  from a script. They are libraries.
 - Link focus nodes only to GraphDB — always offer GraphDB (when present) and GitHub links separately.
 - Link shapes or constraints to RDFS vocabulary files — link to the profile SHACL
   file on GitHub.
@@ -275,23 +425,37 @@ It contributes no SHACL result rows.
 - Show “reports parsed” in frontmatter (removed intentionally).
 - Use full-width layout — dashboard content stays in a constrained card width
   (`max-width` in CSS).
+- Pre-render sort orders as pages again. Ordering is a client-side concern; the
+  `m/<METRIC>/` tree was removed for that reason and only `m/execution_err/`
+  remains (it is evidence, not an ordering).
+- Make sorting a hard requirement for reading the dashboard. Every number must
+  stay reachable with JavaScript disabled.
 
 ## File ownership
 
 | Task | Primary file |
 |------|----------------|
-| Dashboard structure, pages, metrics | `build_dashboard.py` |
-| Report parsing, CSV, GraphDB SPARQL lookup, GitHub shape links | `collect-results.py` |
-| Timing parsing, history, duration formatting | `collect-timings.py` |
+| The whole pipeline | `validate-all-and-write-to-gdb.sh` |
+| Writing one validation run into GraphDB | `write-validation-run-to-gdb.py` |
+| History retention / pruning the GraphDB graph | `gdb_history.py` |
+| Reading validation runs back out of GraphDB | `gdb_source.py` |
+| Dashboard entry point, run-history page, Δ rendering | `build_dashboard_gdb.py` |
+| Cube structure, pages, metrics, client-side sorting | `cube_dashboard.py` |
+| IRI shortening, SHACL index, GraphDB/GitHub links | `collect-results.py` |
+| Duration formatting | `collect-timings.py` |
 | Visual theme, table layout, icons | `dashboard.css` |
-| Batch validation | `validate-all.sh` |
 
 When changing link behaviour, update both the implementation and the meta text on
 `index.html` / drill-down pages / `README.md`.
 
 ## CI
 
-`.github/workflows/dashboard.yml` checks out this repository and
-`entsoe/application-profiles-library`, rebuilds the complete dashboard on push
-to `main`, stages the entry points, CSS, CSV, and complete `dashboard/` tree,
-then deploys that tree to GitHub Pages. It does not rerun SHACL validation.
+`.github/workflows/dashboard.yml` **publishes, it does not build.** The
+dashboard is generated from the GraphDB history graph, which exists only on the
+machine that runs the batch, so the generated `index.html` + `dashboard/` are
+committed and CI copies them into `_site` alongside `dashboard.css` and deploys
+to GitHub Pages. It does not check out the shapes library, does not run Python,
+and does not rerun SHACL validation.
+
+This means a pipeline run is only published once its output is committed. After
+`./validate-all-and-write-to-gdb.sh`, commit `index.html` and `dashboard/`.

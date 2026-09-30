@@ -1,0 +1,46 @@
+# Sample Turtle from query-result (6).csv
+#
+# SPARQL columns:
+#   x      one bound ValidationResult blank node (also appears as an sh:result)
+#   file   SHACL filename (query binding, not a triple)
+#   report ValidationReport blank node — the triple subject
+#   pr     predicate
+#   po     object
+#
+# The CSV has 1003 rows but only 4 distinct (pr, po-kind) cases.
+# This file illustrates each case; 998 extra sh:result blank nodes are omitted.
+#
+# Original GraphDB blank nodes:
+#   report  _:genid-95cca04aaf744a6fb46f2b83f1aefced1461615-6A93FFC1DC4DBF1F1AE43DFA305FD379
+#   x       _:genid-95cca04aaf744a6fb46f2b83f1aefced1461615-EDF923AB831E4114652D9F4893F940AC
+# File binding: ImpactAssessmentMatrix-AP-Con-Simple-SHACL.ttl
+
+@prefix rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .
+@prefix sh:    <http://www.w3.org/ns/shacl#> .
+@prefix rdf4j: <http://rdf4j.org/schema/rdf4j#> .
+
+_:report
+    # Case 1 — IRI object
+    #   pr = rdf:type
+    #   po = sh:ValidationReport
+    a sh:ValidationReport ;
+
+    # Case 2 — boolean true
+    #   pr = rdf4j:truncated
+    #   po = "true"^^xsd:boolean
+    # GraphDB sets this when the report hit a result cap
+    # (1,000 per constraint / 10,000 per report). Counts are then lower bounds.
+    rdf4j:truncated true ;
+
+    # Case 3 — boolean false
+    #   pr = sh:conforms
+    #   po = "false"^^xsd:boolean
+    sh:conforms false ;
+
+    # Case 4 — blank-node object (repeated)
+    #   pr = sh:result
+    #   po = _:…  (1,000 distinct blank nodes in the CSV)
+    # Shown twice: the bound ?x result, then one other. Remaining 998 omitted.
+    sh:result _:resultX ;
+    sh:result _:resultOther .

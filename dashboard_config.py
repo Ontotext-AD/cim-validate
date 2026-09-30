@@ -54,7 +54,6 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
             raise ValueError(f"Repository id is missing or duplicated: {repo_id!r}")
         seen_repos.add(repo_id)
         repo["checkout_path"] = (ROOT / str(repo["checkout"])).resolve()
-        repo["results_path"] = (ROOT / str(repo.get("evaluation_results") or ".")).resolve()
         seen_families: set[str] = set()
         for family in repo.get("families") or []:
             family_id = str(family.get("id") or "")
@@ -217,7 +216,6 @@ def build_catalog(config: dict | None = None) -> dict:
                     "shacl_file": filename,
                     "shacl_path": path,
                     "shacl_subpath": subpath,
-                    "result_dir": repo["results_path"] / path.stem,
                     "repo": repo,
                 }
                 catalog["sources"][source_id] = source

@@ -1,3 +1,29 @@
 .DS_Store
 __pycache__/
 *.pyc
+
+# Retired file-based pipeline. Validation runs live in the GraphDB
+# validation-history graph; the only batch script is
+# validate-all-and-write-to-gdb.sh, and the only dashboard is index.html +
+# dashboard/. These scripts, Python entry points, and static artifacts read
+# or wrote per-profile validation-report.ttl / timing.txt folders and must
+# not re-enter the repository. They may still exist in a working copy.
+# Scripts
+/validate-all.sh
+/continue-validate.sh
+# Python
+/build_dashboard.py
+/upload-results.py
+# Per-profile report folders and the files that consumed them
+/*-SHACL/
+/.timing-history.json
+/validation-results.csv
+/validation-results.html
+
+# Batch logs
+/batch.log
+/batch-gdb.log
+
+# Superseded output locations from when the GraphDB build wrote a second site
+/index-gdb.html
+/dashboard-gdb/

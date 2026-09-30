@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import html
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -14,7 +15,10 @@ from urllib.parse import quote
 import dashboard_config as dc
 
 ROOT = Path(__file__).resolve().parent
+# Output targets. build() rebinds them from validation_history in
+# dashboard-config.json, so the published location is configured in one place.
 DASH = ROOT / "dashboard"
+INDEX = ROOT / "index.html"
 PAGE_SIZE = 1500
 METRICS = ("time_sum", "time_max", "v_count", "dv_count", "w_count", "dw_count", "g_count", "t_count")
 VALIDATION_METRICS = ("v_count", "dv_count", "w_count", "dw_count", "g_count", "t_count")
@@ -106,6 +110,176 @@ TABLE_SCRIPT = """
 </script>
 """
 
+# Column layout of one row in a scope's rows.json sidecar. Values are carried
+# next to their pre-formatted display string so the browser never reimplements
+# duration formatting.
+ROW_COLUMNS = (
+    "name", "href", "leaf",
+    "time_sum", "time_sum_disp", "time_max", "time_max_disp",
+    "v_count", "dv_count", "w_count", "dw_count", "g_count", "t_count",
+)
+
+SORT_SCRIPT = """
+<script>
+(function () {
+  var table = document.querySelector("table[data-rows]");
+  if (!table || !window.fetch) return;
+  var url = table.getAttribute("data-rows");
+  var size = parseInt(table.getAttribute("data-page-size"), 10) || 1500;
+  var tbody = table.tBodies[0];
+  var pagers = [].slice.call(document.querySelectorAll("[data-pager]"));
+  var baseBody = tbody.innerHTML;
+  var basePagers = pagers.map(function (el) { return el.innerHTML; });
+  var COUNTS = ["v_count", "dv_count", "w_count", "dw_count", "g_count", "t_count"];
+  var COLS = {
+    time_sum: [3, 4], time_max: [5, 6],
+    v_count: [7, null], dv_count: [8, null], w_count: [9, null],
+    dw_count: [10, null], g_count: [11, null], t_count: [12, null]
+  };
+  var rows = null, pending = false;
+
+  function esc(text) {
+    return String(text).replace(/[&<>"]/g, function (ch) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch];
+    });
+  }
+  function brk(text) { return esc(text).replace(/([\\/:#._?=-])(?!$)/g, "$1<wbr>"); }
+
+  function readHash() {
+    var name = /(?:^|[#&])sort=([a-z_]+)/.exec(location.hash);
+    if (!name || (name[1] !== "name" && !COLS[name[1]])) return null;
+    var dir = /(?:^|[#&])dir=(asc|desc)/.exec(location.hash);
+    var page = /(?:^|[#&])page=(\\d+)/.exec(location.hash);
+    return {
+      metric: name[1],
+      dir: dir ? dir[1] : (name[1] === "name" ? "asc" : "desc"),
+      page: page ? Math.max(1, parseInt(page[1], 10)) : 1
+    };
+  }
+  function hashFor(state, page) {
+    return "#sort=" + state.metric + "&dir=" + state.dir + "&page=" + page;
+  }
+
+  function hrefFor(row, metric) {
+    var href = row[1];
+    if (!row[2]) return href + "#sort=" + metric;
+    var dir = href.replace(/index\\.html$/, "");
+    if (metric === "v_count" && row[7]) return dir + "violation/index.html";
+    if (metric === "w_count" && row[9]) return dir + "warning/index.html";
+    return href;
+  }
+  function cellHtml(row, metric) {
+    var col = COLS[metric];
+    var disp = col[1] === null ? (row[col[0]] > 0 ? String(row[col[0]]) : "") : row[col[1]];
+    if (!disp) return "";
+    return '<a href="' + esc(hrefFor(row, metric)) + '">' + esc(disp) + "</a>";
+  }
+  function rowHtml(row) {
+    return '<tr><td class="profile"><a href="' + esc(row[1]) + '">' + brk(row[0]) + "</a></td>"
+      + '<td class="dur">' + cellHtml(row, "time_sum") + "</td>"
+      + '<td class="dur">' + cellHtml(row, "time_max") + "</td>"
+      + COUNTS.map(function (metric) {
+          return '<td class="num cell">' + cellHtml(row, metric) + "</td>";
+        }).join("")
+      + "</tr>";
+  }
+
+  function compare(first, second, state) {
+    if (state.metric !== "name") {
+      var col = COLS[state.metric][0];
+      var left = first[col], right = second[col];
+      var leftNull = left === null || left === undefined;
+      var rightNull = right === null || right === undefined;
+      if (leftNull !== rightNull) return leftNull ? 1 : -1;
+      if (!leftNull && left !== right) return state.dir === "asc" ? left - right : right - left;
+    }
+    var a = String(first[0]).toLowerCase(), b = String(second[0]).toLowerCase();
+    if (a === b) return 0;
+    var order = a < b ? -1 : 1;
+    return state.metric === "name" && state.dir === "desc" ? -order : order;
+  }
+
+  function mark(state) {
+    table.querySelectorAll("th[data-sort]").forEach(function (th) {
+      if (state && th.getAttribute("data-sort") === state.metric) {
+        th.setAttribute("data-dir", state.dir);
+      } else {
+        th.removeAttribute("data-dir");
+      }
+    });
+  }
+
+  function apply(state) {
+    mark(state);
+    if (!state || !rows) {
+      tbody.innerHTML = baseBody;
+      pagers.forEach(function (el, i) { el.innerHTML = basePagers[i]; });
+      return;
+    }
+    var sorted = rows.slice().sort(function (a, b) { return compare(a, b, state); });
+    var pages = Math.max(1, Math.ceil(sorted.length / size));
+    var page = Math.min(state.page, pages);
+    tbody.innerHTML = sorted.slice((page - 1) * size, page * size).map(rowHtml).join("")
+      || '<tr><td colspan="9">No lower-level records.</td></tr>';
+    var nav = "";
+    if (pages > 1) {
+      var links = [];
+      for (var number = 1; number <= pages; number++) {
+        links.push(number === page
+          ? "<strong>" + number + "</strong>"
+          : '<a href="' + hashFor(state, number) + '">' + number + "</a>");
+      }
+      nav = "Pages: " + links.join(" \\u00b7 ");
+    }
+    pagers.forEach(function (el) { el.innerHTML = nav; });
+  }
+
+  function render() {
+    var state = readHash();
+    if (!state || rows) { apply(state); return; }
+    if (pending) return;
+    pending = true;
+    table.classList.add("sorting");
+    fetch(url).then(function (response) {
+      if (!response.ok) throw new Error(response.status);
+      return response.json();
+    }).then(function (payload) {
+      rows = payload.rows;
+      size = payload.size || size;
+      pending = false;
+      table.classList.remove("sorting");
+      apply(readHash());
+    }).catch(function () {
+      pending = false;
+      table.classList.remove("sorting");
+      table.classList.add("sort-failed");
+      apply(null);
+    });
+  }
+
+  table.querySelectorAll("th[data-sort]").forEach(function (th) {
+    th.addEventListener("click", function (event) {
+      if (event.target.classList.contains("col-resize")) return;
+      var metric = th.getAttribute("data-sort");
+      var state = readHash();
+      var dir = metric === "name" ? "asc" : "desc";
+      if (state && state.metric === metric) {
+        if (state.dir !== dir) {
+          history.replaceState(null, "", location.pathname + location.search);
+          apply(null);
+          return;
+        }
+        dir = dir === "asc" ? "desc" : "asc";
+      }
+      location.hash = "sort=" + metric + "&dir=" + dir + "&page=1";
+    });
+  });
+  window.addEventListener("hashchange", render);
+  render();
+})();
+</script>
+"""
+
 
 def shell(title: str, body: str, out_dir: Path) -> str:
     resolved_dir = out_dir.resolve()
@@ -126,7 +300,7 @@ def shell(title: str, body: str, out_dir: Path) -> str:
 <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{esc(css_href(out_dir))}">
 </head>
-<body{body_class}>{body}{TABLE_SCRIPT if "<table" in body else ""}</body>
+<body{body_class}>{body}{TABLE_SCRIPT if "<table" in body else ""}{SORT_SCRIPT if "data-rows" in body else ""}</body>
 </html>
 """
 
@@ -210,34 +384,6 @@ def parse_shapes(path: Path) -> list[dict]:
     return shapes
 
 
-def report_meta(path: Path) -> dict:
-    if not path.is_file():
-        return {
-            "exists": False,
-            "turtle": False,
-            "conforms": False,
-            "truncated": False,
-            "execution_error": True,
-            "error_text": "(missing validation-report.ttl)",
-        }
-    head = path.read_text(encoding="utf-8", errors="replace")[:20000]
-    is_validation_report = (
-        "sh:ValidationReport" in head
-        or "http://www.w3.org/ns/shacl#ValidationReport" in head
-    )
-    error_text = head.strip() if not is_validation_report else ""
-    if not is_validation_report and not error_text:
-        error_text = "(empty response)"
-    return {
-        "exists": True,
-        "turtle": is_validation_report,
-        "conforms": "sh:conforms true" in head,
-        "truncated": "rdf4j:truncated true" in head,
-        "execution_error": not is_validation_report,
-        "error_text": error_text,
-    }
-
-
 def result_iri(result: dict, field: str) -> str:
     term = result.get(field)
     return cr.strip_brackets(term) or (term or "")
@@ -287,41 +433,6 @@ def unique_focus(items: list[dict]) -> list[dict]:
             seen.add(key)
             answer.append(item)
     return answer
-
-
-def collect_runs(catalog: dict, index: dict) -> list[dict]:
-    timing_by_source = {str(row["source_id"]): row for row in ct.collect_rows()}
-    runs = []
-    all_items = []
-    for source in sorted(catalog["sources"].values(), key=lambda item: item["id"]):
-        timing = timing_by_source.get(source["id"], {})
-        report = source["result_dir"] / "validation-report.ttl"
-        meta = report_meta(report)
-        shapes = parse_shapes(source["shacl_path"])
-        items = []
-        if meta["turtle"]:
-            items = [result_item(raw, source, index) for raw in cr.parse_report(report)]
-        all_items.extend(items)
-        run = {
-            **source,
-            "duration": timing.get("duration"),
-            "duration_disp": timing.get("duration_disp") or "—",
-            "http_status": str(timing.get("http_status") or ""),
-            "finished_at": str(timing.get("finished_at") or ""),
-            "timing_href": str(timing.get("timing_href") or ""),
-            "report_href": str(timing.get("report_href") or ""),
-            "meta": meta,
-            "shapes": shapes,
-            "items": items,
-        }
-        runs.append(run)
-
-    present = cr.iris_present_in_graphdb(
-        {item["focus_iri"] for item in all_items if item["focus_iri"]}
-    )
-    for item in all_items:
-        item["in_gdb"] = item["focus_iri"] in present
-    return runs
 
 
 def make_leaf(run: dict, shape: dict, items: list[dict]) -> dict:
@@ -507,31 +618,36 @@ def metric_value(metric: str, value) -> str:
     return str(value) if int(value or 0) > 0 else ""
 
 
-def scope_metric_target(child: dict, metric: str) -> Path:
+def metric_href(child: dict, metric: str, out_dir: Path) -> str:
+    """Where a measure on a child row is grounded one level down.
+
+    Aggregates open the child page with the table already ordered by that
+    measure; leaves open their focus-node evidence or their source grounding.
+    """
     base = child["page"]
     if child.get("children"):
-        return base.parent / "m" / metric / "index.html"
+        return f"{rel(out_dir, base)}#sort={metric}"
     if metric == "v_count" and child["v_count"]:
-        return base.parent / "violation" / "index.html"
+        return rel(out_dir, base.parent / "violation" / "index.html")
     if metric == "w_count" and child["w_count"]:
-        return base.parent / "warning" / "index.html"
-    return base
+        return rel(out_dir, base.parent / "warning" / "index.html")
+    return rel(out_dir, base)
 
 
 def cell(child: dict, metric: str, out_dir: Path) -> str:
     display = metric_value(metric, child.get(metric))
     if not display:
         return ""
-    return f'<a href="{esc(rel(out_dir, scope_metric_target(child, metric)))}">{esc(display)}</a>'
+    return f'<a href="{esc(metric_href(child, metric, out_dir))}">{esc(display)}</a>'
 
 
 def summary_tiles(scope: dict, out_dir: Path) -> str:
     tiles = []
     for metric in METRICS:
         value = metric_value(metric, scope.get(metric))
-        href = scope["metric_dir"] / metric / "index.html" if scope.get("children") else scope["page"]
+        href = f"#sort={metric}" if scope.get("children") else rel(out_dir, scope["page"])
         linked = (
-            f'<a href="{esc(rel(out_dir, href))}">{esc(value)}</a>'
+            f'<a href="{esc(href)}">{esc(value)}</a>'
             if value and value != "—" else esc(value)
         )
         tiles.append(f'<div class="stat"><span>{esc(METRIC_LABEL[metric])}</span><strong>{linked}</strong></div>')
@@ -566,44 +682,66 @@ def cube_table(scope: dict, children: list[dict], out_dir: Path, first_label: st
 <td class="num cell">{cell(child, "t_count", out_dir)}</td>
 </tr>"""
         )
+    sortable = (
+        f' data-rows="{esc(rel(out_dir, scope["rows_json"]))}" data-page-size="{PAGE_SIZE}"'
+        if scope.get("children") else ""
+    )
     return f"""<div class="table-wrap">
-<table class="family-table compact">
+<table class="family-table compact"{sortable}>
 <colgroup></colgroup><colgroup span="2"></colgroup>
 <colgroup class="errors" span="2"></colgroup>
 <colgroup class="warnings" span="2"></colgroup>
 <thead>
 <tr>
-<th class="profile" rowspan="2">{esc(first_label)}</th>
+<th class="profile sortable" rowspan="2" data-sort="name">{esc(first_label)}</th>
 <th class="num" colspan="2">Timing</th>
 <th class="num group-err" colspan="2">{ICON["Violation"]} Errors</th>
 <th class="num group-warn" colspan="2">{ICON["Warning"]} Warnings</th>
-<th class="num" rowspan="2">{ICON["Good"]} Good</th>
-<th class="num" rowspan="2">Total</th>
+<th class="num sortable" rowspan="2" data-sort="g_count">{ICON["Good"]} Good</th>
+<th class="num sortable" rowspan="2" data-sort="t_count">Total</th>
 </tr>
 <tr>
-<th class="num">Sum</th><th class="num">Max</th>
-<th class="num group-err">Total</th><th class="num group-err">Distinct</th>
-<th class="num group-warn">Total</th><th class="num group-warn">Distinct</th>
+<th class="num sortable" data-sort="time_sum">Sum</th>
+<th class="num sortable" data-sort="time_max">Max</th>
+<th class="num group-err sortable" data-sort="v_count">Total</th>
+<th class="num group-err sortable" data-sort="dv_count">Distinct</th>
+<th class="num group-warn sortable" data-sort="w_count">Total</th>
+<th class="num group-warn sortable" data-sort="dw_count">Distinct</th>
 </tr>
 </thead>
 <tbody>{"".join(rows) if rows else '<tr><td colspan="9">No lower-level records.</td></tr>'}</tbody>
 </table></div>"""
 
 
-def ranking_table(children: list[dict], metric: str, out_dir: Path, first_label: str) -> str:
-    rows = []
-    for child in children:
-        display = metric_value(metric, child.get(metric))
-        name = f'<a href="{esc(rel(out_dir, child["page"]))}">{brk(child["name"])}</a>'
-        value = (
-            f'<a href="{esc(rel(out_dir, scope_metric_target(child, metric)))}">{esc(display)}</a>'
-            if display else ""
-        )
-        rows.append(f'<tr><td class="profile">{name}</td><td class="num cell">{value}</td></tr>')
-    return f"""<div class="table-wrap"><table class="compact">
-<thead><tr><th class="profile">{esc(first_label)}</th><th class="num">{esc(METRIC_LABEL[metric])}</th></tr></thead>
-<tbody>{"".join(rows) if rows else '<tr><td colspan="2">No lower-level records.</td></tr>'}</tbody>
-</table></div>"""
+def row_payload(child: dict, out_dir: Path) -> list:
+    time_max = child.get("time_max")
+    return [
+        child["name"],
+        rel(out_dir, child["page"]),
+        0 if child.get("children") else 1,
+        round(float(child.get("time_sum") or 0.0), 6),
+        metric_value("time_sum", child.get("time_sum")),
+        round(float(time_max), 6) if isinstance(time_max, (int, float)) else None,
+        metric_value("time_max", time_max),
+        *(int(child.get(key) or 0) for key in VALIDATION_METRICS),
+    ]
+
+
+def write_rows_json(scope: dict) -> None:
+    """Compact sort payload for one scope: every child row, all measures.
+
+    Fetched lazily by the browser on the first sort, so the default view costs
+    no extra request. Sorting happens over the whole child set, not just the
+    rows that happen to be on the current static page.
+    """
+    payload = {
+        "columns": list(ROW_COLUMNS),
+        "size": PAGE_SIZE,
+        "rows": [row_payload(child, scope["page"].parent) for child in scope["children"]],
+    }
+    path = scope["rows_json"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
 
 
 def pager(page_count: int, current: int) -> str:
@@ -616,7 +754,7 @@ def pager(page_count: int, current: int) -> str:
             f"<strong>{number}</strong>"
             if number == current else f'<a href="{filename}">{number}</a>'
         )
-    return f'<p class="pager">Pages: {" · ".join(links)}</p>'
+    return f'<p class="pager" data-pager>Pages: {" · ".join(links)}</p>'
 
 
 def write_execution_error_page(
@@ -691,37 +829,8 @@ def write_scope_pages(
 {page_nav}
 """
         write(page_path, f"{scope['name']} · SHACL cube", base_body)
-    for metric in METRICS:
-        ranked = sorted(
-            (
-                child
-                for child in scope["children"]
-                if metric_value(metric, child.get(metric))
-            ),
-            key=lambda child: (
-                child.get(metric) is not None,
-                float(child.get(metric) or 0),
-                child["name"].lower(),
-            ),
-            reverse=True,
-        )
-        metric_dir = scope["metric_dir"] / metric
-        ranked_chunks = [
-            ranked[offset:offset + PAGE_SIZE]
-            for offset in range(0, max(len(ranked), 1), PAGE_SIZE)
-        ]
-        for page_number, chunk in enumerate(ranked_chunks, 1):
-            metric_path = metric_dir / ("index.html" if page_number == 1 else f"p{page_number}.html")
-            page_nav = pager(len(ranked_chunks), page_number)
-            metric_body = f"""
-<p class="crumb">{crumb(breadcrumbs + [(scope["name"], base)], metric_path.parent, METRIC_LABEL[metric])}</p>
-<h1>{esc(scope["name"])} · {esc(METRIC_LABEL[metric])}</h1>
-<p class="meta">Lower-level records ordered by decreasing {esc(METRIC_LABEL[metric].lower())}.</p>
-{page_nav}
-{ranking_table(chunk, metric, metric_path.parent, first_label)}
-{page_nav}
-"""
-            write(metric_path, f"{METRIC_LABEL[metric]} · {scope['name']}", metric_body)
+    if scope["children"]:
+        write_rows_json(scope)
     if scope.get("level") in EXECUTION_ERROR_TILE_LEVELS:
         write_execution_error_page(scope, breadcrumbs)
 
@@ -822,37 +931,111 @@ Error and warning measures open their focus-node evidence pages.</p>
 
 
 def assign_pages(cube: dict) -> None:
-    cube["page"] = ROOT / "index.html"
+    # The landing page lives at the repository root, so its sidecar and
+    # run-level evidence go under dashboard/all/ to keep the root clean.
+    cube["page"] = INDEX
     cube["metric_dir"] = DASH / "all" / "m"
+    cube["rows_json"] = DASH / "all" / "rows.json"
     for repo in cube["children"]:
         repo["page"] = DASH / "r" / repo["id"] / "index.html"
         repo["metric_dir"] = repo["page"].parent / "m"
+        repo["rows_json"] = repo["page"].parent / "rows.json"
         for family in repo["children"]:
             family["page"] = repo["page"].parent / "f" / family["id"] / "index.html"
             family["metric_dir"] = family["page"].parent / "m"
+            family["rows_json"] = family["page"].parent / "rows.json"
             for profile in family["children"]:
                 profile["page"] = family["page"].parent / "p" / profile["id"] / "index.html"
                 profile["metric_dir"] = profile["page"].parent / "m"
+                profile["rows_json"] = profile["page"].parent / "rows.json"
                 for leaf in profile["children"]:
                     leaf["page"] = profile["page"].parent / "s" / leaf["id"] / "index.html"
 
 
-def build() -> Path:
+def cube_node_json(scope: dict) -> dict:
+    record = {
+        "id": scope["id"],
+        "name": scope["name"],
+        **{key: scope.get(key) for key in METRICS},
+    }
+    if scope.get("children"):
+        record.update({
+            "level": scope["level"],
+            "page": scope["page"].relative_to(ROOT).as_posix(),
+            "execution_err": scope.get("execution_err", 0),
+            "children": [cube_node_json(child) for child in scope["children"]],
+        })
+    else:
+        # Shape pages carry no "page": they are always the parent profile's
+        # page directory + s/<id>/index.html, and spelling out 13k long paths
+        # costs more than the whole rest of the file.
+        run = scope["run"]
+        record.update({
+            "level": "shape",
+            "uri": scope["uri"],
+            "kind": scope["kind"],
+            "declared": scope["declared"],
+            "shacl_file": run["shacl_file"],
+            "line": scope["line"],
+        })
+    return record
+
+
+def write_cube_json(cube: dict) -> Path:
+    """The whole cube as one machine-readable artifact.
+
+    Not used by the pages — it exists so cross-cutting questions ("every shape
+    above 50 errors, across all families") can be answered without scraping
+    HTML or re-running the build.
+    """
+    path = DASH / "cube.json"
+    payload = {
+        "metrics": list(METRICS),
+        "shape_page": "<parent page directory>/s/<id>/index.html",
+        "root": cube_node_json(cube),
+    }
+    path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+    return path
+
+
+def build(
+    collect,
+    dash_dir: Path | None = None,
+    index_path: Path | None = None,
+    source_note: str = "",
+) -> Path:
+    """Render the cube from an injected run source.
+
+    ``collect`` is any ``(catalog, index) -> list[run]`` callable; the only one
+    in the repository reads the GraphDB validation-history graph (see
+    ``build_dashboard_gdb.py``). ``dash_dir``/``index_path`` default to the
+    published ``dashboard/`` + ``index.html``, and ``source_note`` is appended
+    to the landing frontmatter to say where the numbers came from.
+    """
+    global DASH, INDEX
+    DASH = dash_dir or ROOT / "dashboard"
+    INDEX = index_path or ROOT / "index.html"
     config = dc.load_config()
     catalog = dc.build_catalog(config)
     index = cr.build_shacl_index()
     if DASH.exists():
         shutil.rmtree(DASH)
     DASH.mkdir()
-    runs = collect_runs(catalog, index)
+    runs = collect(catalog, index)
     cube = build_cube(catalog, runs)
     assign_pages(cube)
     assert_rollups(cube)
 
+    cube_json = write_cube_json(cube)
     root_meta = (
         "Configured shape repositories. Every measure links to the next level where it is grounded. "
-        "Timing sum/max use unique SHACL-file validation runs."
+        "Timing sum/max use unique SHACL-file validation runs.<br>"
+        "Click any column header to reorder the table by that measure; the order is kept in the "
+        f'page address so a sorted view can be shared. Full cube data: '
+        f'<a href="{esc(rel(INDEX.parent, cube_json))}">cube.json</a>.'
     )
+    if source_note:
+        root_meta = f"{root_meta}<br>{source_note}"
     write_scope_pages(cube, [], "Repository", root_meta)
     for repo in cube["children"]:
         repo_cfg = repo["repo"]
@@ -890,10 +1073,7 @@ def build() -> Path:
                     write_shape_page(leaf, shape_crumbs)
     print(
         f"Cube: {len(cube['children'])} repositories, {len(runs)} runs, "
-        f"{cube['t_count']} individual shapes"
+        f"{cube['t_count']} individual shapes, "
+        f"cube.json {cube_json.stat().st_size / 1048576:.1f} MiB"
     )
-    return ROOT / "index.html"
-
-
-if __name__ == "__main__":
-    print(f"Dashboard: {build()}")
+    return INDEX

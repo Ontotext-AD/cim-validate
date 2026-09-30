@@ -11,18 +11,17 @@ once with the raw Turtle response plus timing metadata. This script:
   2. Flattens it one level deep (report -> ``sh:result`` blank nodes -> their
      properties, e.g. ``sh:focusNode``, ``sh:sourceShape``,
      ``sh:resultSeverity``, ``sh:value``, ``sh:resultMessage``), the same
-     shape sketched by ``validation-result-model.ttl`` and already used by
-     ``upload-results.py``.
+     shape sketched by ``validation-result-model.ttl``.
   3. Tags the report's (blank-node) subject with this run's provenance:
      ``ex:file``, ``ex:repositoryValidated``, ``ex:httpStatus``,
      ``ex:durationSeconds``, ``ex:finishedAt``.
   4. POSTs the resulting triples into GraphDB with the configured named graph
      as context.
 
-Unlike ``upload-results.py``, this script never issues ``DROP GRAPH`` before
-posting: each invocation *appends* one more ``sh:ValidationReport`` blank node
-("run") with its own ``ex:finishedAt`` / ``ex:durationSeconds`` /
-``ex:httpStatus`` and its own ``sh:result`` -> ``sh:ValidationResult`` nodes.
+The graph is never dropped: each invocation *appends* one more
+``sh:ValidationReport`` blank node ("run") with its own ``ex:finishedAt`` /
+``ex:durationSeconds`` / ``ex:httpStatus`` and its own ``sh:result`` ->
+``sh:ValidationResult`` nodes.
 
 History is then trimmed to a bounded window by ``gdb_history.prune_file()``
 (disable with ``--no-prune``): a SHACL file keeps its **last two timings** and
@@ -69,11 +68,10 @@ from rdflib.plugins.parsers.notation3 import BadSyntax
 EX = Namespace("http://example.org/ns#")
 SH = Namespace("http://www.w3.org/ns/shacl#")
 
-# Mirrors upload-results.py's cleaning query: keep the report subject, its
-# direct properties, and -- one level deeper -- the properties of any blank
-# node it points to (e.g. each sh:result), while dropping the
-# rsx:shapesGraph -> rdf4j:nil bookkeeping triple that carries no history
-# value.
+# Keep the report subject, its direct properties, and -- one level deeper --
+# the properties of any blank node it points to (e.g. each sh:result), while
+# dropping the rsx:shapesGraph -> rdf4j:nil bookkeeping triple that carries
+# no history value.
 CLEAN_QUERY = """
     PREFIX sh: <http://www.w3.org/ns/shacl#>
     PREFIX rdf4j: <http://rdf4j.org/schema/rdf4j#>
@@ -125,11 +123,10 @@ def append_run_metadata(original_graph: Graph, cleaned_graph: Graph, meta: dict[
     """Tag the report's own (blank-node) subject with this run's timing and
     provenance.
 
-    The subject is selected by type, not by position: ``upload-results.py``
-    uses the graph's first subject, which rdflib does not order, so for a
-    non-conforming report the metadata can land on a ``sh:ValidationResult``
-    instead of the report. Runs written that way are unattributable to a
-    SHACL file (``gdb_source.py`` recovers them for backwards compatibility).
+    The subject is selected by type (``sh:ValidationReport``), not by graph
+    iteration order, so timing metadata always lands on the report node.
+    ``gdb_source.py`` still recovers older runs that stored ``ex:file`` on a
+    ``sh:ValidationResult`` instead.
     """
     cleaned_graph.bind("ex", EX)
     report_subject = next(original_graph.subjects(RDF.type, SH.ValidationReport), None)

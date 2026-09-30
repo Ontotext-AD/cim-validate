@@ -6,6 +6,15 @@
     "graphdb_sparql": "http://localhost:7200/repositories/relicapgrid",
     "instance_github_repository": "entsoe/relicapgrid"
   },
+  "validation_history": {
+    "base_url": "http://localhost:7200/",
+    "repository": "cim-shacl",
+    "graph": "https://github.com/entsoe/application-profiles/SHACL/reports",
+    "index": "index.html",
+    "dashboard_dir": "dashboard",
+    "keep_timings": 2,
+    "keep_results": 1
+  },
   "repositories": [
     {
       "id": "application-profiles-library",
@@ -13,7 +22,6 @@
       "checkout": "../application-profiles-library",
       "github_repository": "entsoe/application-profiles-library",
       "github_ref": "main",
-      "evaluation_results": ".",
       "families": [
         {
           "id": "CGMES",

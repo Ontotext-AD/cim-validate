@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Read SHACL validation runs back out of a GraphDB validation-history graph.
 
-This is the data-access half of the GraphDB-backed dashboard: it turns the
-named graph written by ``validate-all-and-write-to-gdb.sh`` /
+This is the data-access half of the dashboard: it turns the named graph
+written by ``validate-all-and-write-to-gdb.sh`` /
 ``write-validation-run-to-gdb.py`` into plain Python run records. It knows
 nothing about the cube or the HTML pages -- ``build_dashboard_gdb.py`` glues
-these records onto the same cube used by the file-based dashboard.
+these records onto the cube in ``cube_dashboard.py``.
 
 The history graph holds one ``sh:ValidationReport`` node per validation of one
 SHACL file, trimmed by ``gdb_history.py`` to the **last two timings** per file
@@ -199,8 +199,9 @@ def escape_literal(value: str) -> str:
 
 
 def term_to_turtle(binding: dict | None) -> str:
-    """Render one SPARQL JSON binding as the Turtle term the file-based parser
-    produces, so ``collect-results.py`` helpers can consume it unchanged."""
+    """Render one SPARQL JSON binding as the Turtle term
+    ``collect-results.py`` helpers consume (IRI brackets, ASCII-escaped
+    literals)."""
     if not binding:
         return ""
     kind = binding.get("type")

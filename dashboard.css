@@ -350,6 +350,22 @@ colgroup.errors { background: rgba(220, 53, 69, .035); }
 colgroup.warnings { background: rgba(255, 193, 7, .08); }
 th.group-err { background: var(--red-50); }
 th.group-warn { background: var(--yellow-50); }
+th.sortable { cursor: pointer; padding-right: 1.15rem; }
+th.sortable:hover { background: var(--surface-hover); color: var(--text-color); }
+th.sortable::after {
+  content: "\2195";
+  position: absolute;
+  right: .55rem;
+  opacity: .28;
+  font-weight: 400;
+}
+th.sortable[data-dir]::after { opacity: 1; color: var(--primary-color); }
+th.sortable[data-dir="desc"]::after { content: "\2193"; }
+th.sortable[data-dir="asc"]::after { content: "\2191"; }
+table.sorting tbody { opacity: .45; }
+table.sort-failed th.sortable { cursor: default; }
+table.sort-failed th.sortable::after { content: ""; }
+
 .col-resize {
   position: absolute;
   top: 0;
@@ -364,6 +380,7 @@ table.resizing .col-resize { background: var(--primary-color); opacity: .4; }
 table.resizing { user-select: none; cursor: col-resize; }
 td.bad, .bad { color: var(--bs-danger); font-weight: 600; }
 td.slow, .slow { color: var(--bs-orange); }
+td.good-delta, .good-delta { color: var(--bs-success); }
 
 .icon { font-size: 1.85rem; line-height: 1; vertical-align: -0.18em; }
 .icon.violation { color: var(--bs-danger); }
