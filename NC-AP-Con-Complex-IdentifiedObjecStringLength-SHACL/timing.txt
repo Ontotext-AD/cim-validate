@@ -1,5 +1,0 @@
-file: NC-AP-Con-Complex-IdentifiedObjecStringLength-SHACL.ttl
-repository: relicapgrid
-http_status: 200
-duration_seconds: 0.421
-finished_at: 2026-09-08T14:09:05+03:00

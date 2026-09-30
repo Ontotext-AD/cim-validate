@@ -1,5 +1,0 @@
-file: 61970-600-2_Topology-AP-Con-Complex-InverseAssociation-SHACL.ttl
-repository: relicapgrid
-http_status: 200
-duration_seconds: 0.218
-finished_at: 2026-09-08T14:08:31+03:00

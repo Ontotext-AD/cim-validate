@@ -1,5 +1,0 @@
-file: 61968-13_GeographicalLocation-AP-Con-Complex-SHACL.ttl
-repository: relicapgrid
-http_status: 200
-duration_seconds: 0.394
-finished_at: 2026-09-08T14:07:45+03:00

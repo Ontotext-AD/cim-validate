@@ -1,5 +1,0 @@
-file: 61970-600-2_GeographicalLocation-AP-Con-Complex-Implicit-CrossProfile-SHACL.ttl
-repository: relicapgrid
-http_status: 200
-duration_seconds: 0.107
-finished_at: 2026-09-08T14:08:27+03:00

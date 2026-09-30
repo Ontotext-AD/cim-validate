@@ -1,5 +1,0 @@
-file: SteadyStateHypothesisSchedule-AP-Con-Simple-SHACL.ttl
-repository: relicapgrid
-http_status: 200
-duration_seconds: 1.368
-finished_at: 2026-09-08T14:09:19+03:00

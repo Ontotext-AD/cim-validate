@@ -1,5 +1,0 @@
-file: 61970-301_Topology-AP-Con-Complex-NotSolvedMAS-SHACL.ttl
-repository: relicapgrid
-http_status: 200
-duration_seconds: 0.086
-finished_at: 2026-09-08T14:07:48+03:00

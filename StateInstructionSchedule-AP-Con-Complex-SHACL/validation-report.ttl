@@ -1,1 +1,0 @@
-VisitorException: QName 'nc:PowerShiftKeyDistribution.PowerBidSchedule' uses an undefined prefix
