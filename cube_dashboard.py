@@ -49,6 +49,15 @@ UUID_RE = re.compile(
 )
 
 
+def is_relative_to(path: Path, other: Path) -> bool:
+    """Back-port of Path.is_relative_to() for Python < 3.9."""
+    try:
+        path.relative_to(other)
+        return True
+    except ValueError:
+        return False
+
+
 def _load(name: str, filename: str):
     spec = importlib.util.spec_from_file_location(name, ROOT / filename)
     if spec is None or spec.loader is None:
@@ -284,7 +293,7 @@ def shell(title: str, body: str, out_dir: Path) -> str:
     level_zero_metrics = (DASH / "all").resolve()
     is_level_zero = (
         resolved_dir == ROOT
-        or resolved_dir.is_relative_to(level_zero_metrics)
+        or is_relative_to(resolved_dir, level_zero_metrics)
     )
     body_class = ' class="level-zero"' if is_level_zero else ""
     return f"""<!DOCTYPE html>
