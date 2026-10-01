@@ -4,8 +4,9 @@ more timestamped *run* -- into a GraphDB repository/named graph that
 accumulates validation history over time.
 
 Companion to ``validate-all-and-write-to-gdb.sh``. For every SHACL file that
-script POSTs to the ``relicapgrid`` validate endpoint, it invokes this script
-once with the raw Turtle response plus timing metadata. This script:
+script POSTs to the instance-data validate endpoint (``data.graphdb_repository``
+in ``dashboard-config.json``), it invokes this script once with the raw Turtle
+response plus timing metadata. This script:
 
   1. Parses the returned ``validation-report.ttl`` with rdflib.
   2. Flattens it one level deep (report -> ``sh:result`` blank nodes -> their
@@ -50,10 +51,10 @@ Standalone usage:
         --http-status 200 \\
         --duration-seconds 0.437 \\
         --finished-at 2026-09-29T10:00:00+03:00 \\
-        --gdb-url http://localhost:7200/ \\
-        --repository cim-shacl \\
-        --graph https://github.com/entsoe/application-profiles/SHACL/reports \\
         --auth-header "Authorization: Bearer ..."
+
+Destination ``--gdb-url``, ``--repository``, ``--graph``, and
+``--repository-validated`` default to ``dashboard-config.json``.
 """
 from __future__ import annotations
 
@@ -64,6 +65,8 @@ from pathlib import Path
 import requests
 from rdflib import RDF, BNode, Graph, Literal, Namespace, XSD
 from rdflib.plugins.parsers.notation3 import BadSyntax
+
+import dashboard_config as dc
 
 EX = Namespace("http://example.org/ns#")
 SH = Namespace("http://www.w3.org/ns/shacl#")
@@ -85,25 +88,40 @@ CLEAN_QUERY = """
 
 
 def parse_args() -> argparse.Namespace:
+    history = dc.history_settings()
+    data = dc.data_settings()
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--shacl-file", required=True, help="Path to the validated .ttl shapes file")
     p.add_argument("--report", required=True, help="Path to the raw validation response (Turtle or error text)")
-    p.add_argument("--repository-validated", default="relicapgrid",
-                    help="GraphDB repository that was validated against (recorded as metadata only)")
+    p.add_argument(
+        "--repository-validated",
+        default=data["graphdb_repository"],
+        help="GraphDB repository that was validated against (default: data.graphdb_repository)",
+    )
     p.add_argument("--http-status", required=True)
     p.add_argument("--duration-seconds", required=True)
     p.add_argument("--finished-at", required=True, help="ISO-8601 timestamp, e.g. from `date -Iseconds`")
-    p.add_argument("--gdb-url", default="http://localhost:7200/")
-    p.add_argument("--repository", default="cim-shacl",
-                    help="GraphDB repository to write validation-run history into")
-    p.add_argument("--graph", default="https://github.com/entsoe/application-profiles/SHACL/reports",
-                    help="Named graph (context) the run is appended into")
+    p.add_argument(
+        "--gdb-url",
+        default=history["base_url"],
+        help="GraphDB base URL (default: validation_history.base_url)",
+    )
+    p.add_argument(
+        "--repository",
+        default=history["repository"],
+        help="History repository (default: validation_history.repository)",
+    )
+    p.add_argument(
+        "--graph",
+        default=history["graph"],
+        help="Named graph (default: validation_history.graph)",
+    )
     p.add_argument("--auth-header", default="", help='Full header, e.g. "Authorization: Bearer xyz"')
     p.add_argument("--dry-run", action="store_true", help="Print n-triples instead of uploading")
     p.add_argument("--keep-timings", type=int, default=0,
-                    help="Runs to keep for this SHACL file (default: config, else 2)")
+                    help="Runs to keep for this SHACL file (default: validation_history.keep_timings)")
     p.add_argument("--keep-results", type=int, default=0,
-                    help="Runs that keep their sh:result nodes (default: config, else 1)")
+                    help="Runs that keep their sh:result nodes (default: validation_history.keep_results)")
     p.add_argument("--no-prune", action="store_true",
                     help="Append without applying the retention window")
     return p.parse_args()
@@ -204,12 +222,10 @@ def prune_history(args: argparse.Namespace, shacl_file: str) -> None:
     """
     if args.no_prune or args.dry_run:
         return
-    import dashboard_config as dc
     import gdb_history as gh
-    import gdb_source as gs
 
     history = dict(
-        gs.history_config(dc.load_config()),
+        dc.history_settings(),
         base_url=args.gdb_url,
         repository=args.repository,
         graph=args.graph,

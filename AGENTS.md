@@ -18,8 +18,8 @@ documentation.
 
 | Layer | Technology |
 |-------|------------|
-| Validation | GraphDB SHACL validation API (`relicapgrid` on localhost:7200) |
-| Run storage | GraphDB named graph `…/SHACL/reports` in repository `cim-shacl` |
+| Validation | GraphDB SHACL validation API (`data.graphdb_repository` on `validation_history.base_url`) |
+| Run storage | GraphDB named graph `validation_history.graph` in `validation_history.repository` |
 | Build language | Python 3.10+ (stdlib only, except the writer — see below) |
 | Writer dependencies | `rdflib` + `requests` (`requirements.txt`), used only by `write-validation-run-to-gdb.py` |
 | Batch orchestration | Bash (`validate-all-and-write-to-gdb.sh`) |
@@ -225,8 +225,8 @@ and family frontmatter.
 During `build()`, `assign_focus_gdb_presence()` batch-queries GraphDB and sets
 `in_gdb` on each result item:
 
-- **GraphDB** — `sh:focusNode` column links to resource explorer (`…/resource?uri=…&repositoryId=relicapgrid&role=all`) when the IRI is present in the repository; the cell is plain text otherwise.
-- **GitHub** — separate column: code search in `entsoe/relicapgrid` (UUID substring or full IRI) when a search query can be formed.
+- **GraphDB** — `sh:focusNode` column links to resource explorer (`…/resource?uri=…&repositoryId=<data.graphdb_repository>&role=all`) when the IRI is present in the repository; the cell is plain text otherwise.
+- **GitHub** — separate column: code search in `data.instance_github_repository` (UUID substring or full IRI) when a search query can be formed.
 
 Always use `role=all`, not `role=subject`. Presence check uses SPARQL batched in
 chunks of 100 (`GDB_LOOKUP_CHUNK` in `collect-results.py`). Network failure logs
@@ -267,11 +267,13 @@ export GDBPASS=<password>
 ./validate-all-and-write-to-gdb.sh
 ```
 
-One script, four stages: validate every SHACL file against `relicapgrid`,
-append each response to the history graph via
-`write-validation-run-to-gdb.py` (rdflib + requests), re-apply the retention
-window with `gdb_history.py`, then rebuild the dashboard with
-`build_dashboard_gdb.py`. No report or timing files are written to disk.
+One script, four stages: validate every configured SHACL file against
+`data.graphdb_repository`, append each response to
+`validation_history.repository` via `write-validation-run-to-gdb.py` (rdflib +
+requests), re-apply the retention window with `gdb_history.py`, then rebuild
+the dashboard with `build_dashboard_gdb.py`. No report or timing files are
+written to disk. GraphDB endpoints and repository names come from
+`dashboard-config.json`.
 
 The graph is never dropped, so each SHACL file gets one more
 `sh:ValidationReport` node per run, tagged `ex:file` / `ex:finishedAt` /
@@ -321,9 +323,8 @@ selected for deletion.
 reversible:
 
 ```bash
-curl -s -H 'Accept: application/n-quads' \
-  'http://localhost:7200/repositories/cim-shacl/statements?context=%3Chttps%3A%2F%2Fgithub.com%2Fentsoe%2Fapplication-profiles%2FSHACL%2Freports%3E' \
-  -o history-backup.nq
+url=$(python3 -c "import dashboard_config as dc; from urllib.parse import quote; h=dc.history_settings(); print(f\"{h['sparql']}/statements?context={quote('<'+h['graph']+'>')}\")")
+curl -s -H 'Accept: application/n-quads' "$url" -o history-backup.nq
 ```
 
 ### Local preview
@@ -389,7 +390,9 @@ repository/ref, families, SHACL/RDFS/PROF directories, and optional
 SHACL-file-to-profile overrides. Families and repositories are extensible
 lists. GraphDB and instance GitHub settings live in the top-level `data`
 object; the history graph, published output paths, and retention window live
-in `validation_history`.
+in `validation_history`. Scripts read those objects through
+`dashboard_config.data_settings()` and `history_settings()` — do not hardcode
+GraphDB repository names or endpoints.
 
 ### Source report limits
 
@@ -415,6 +418,8 @@ result rows.
   dashboard build touches is stdlib.
 - Reintroduce a file-based run source. Runs come from the GraphDB history
   graph; `cube_dashboard.build()` has no default collector on purpose.
+- Hardcode GraphDB repository names or endpoints (`cim-shacl`, `relicapgrid`,
+  `localhost:7200`). Read them from `dashboard-config.json`.
 - Give `collect-results.py` or `collect-timings.py` a `main()`, or call them
   from a script. They are libraries.
 - Link focus nodes only to GraphDB — always offer GraphDB (when present) and GitHub links separately.

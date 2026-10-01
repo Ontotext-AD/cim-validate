@@ -2,8 +2,12 @@
 """Configuration and source indexing for the static SHACL cube."""
 from __future__ import annotations
 
+import argparse
 import json
+import os
 import re
+import shlex
+import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from pathlib import Path
@@ -62,7 +66,99 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
                     f"Family id is missing or duplicated in {repo_id}: {family_id!r}"
                 )
             seen_families.add(family_id)
+    _section(raw, "data")
+    _section(raw, "validation_history")
+    _field(raw["data"], "graphdb_repository", "data.graphdb_repository")
+    _field(raw["validation_history"], "base_url", "validation_history.base_url")
+    _field(raw["validation_history"], "repository", "validation_history.repository")
+    _field(raw["validation_history"], "graph", "validation_history.graph")
     return raw
+
+
+def _section(raw: dict, name: str) -> dict:
+    section = raw.get(name)
+    if not isinstance(section, dict) or not section:
+        raise ValueError(f"dashboard-config.json must contain a non-empty {name} object")
+    return section
+
+
+def _field(section: dict, key: str, path: str) -> str:
+    value = str(section.get(key) or "").strip()
+    if not value:
+        raise ValueError(f"dashboard-config.json missing {path}")
+    return value
+
+
+def history_settings(config: dict | None = None) -> dict:
+    """History GraphDB target from dashboard-config.json.
+
+    ``GDB_BASE_URL``, ``GDB_HISTORY_REPOSITORY``, and ``GDB_HISTORY_GRAPH``
+    override the matching JSON fields so the batch script and Python readers
+    stay pointed at the same place. There is no hardcoded repository name.
+    """
+    config = config if config is not None else load_config()
+    raw = _section(config, "validation_history")
+    base_url = os.environ.get("GDB_BASE_URL") or _field(
+        raw, "base_url", "validation_history.base_url"
+    )
+    repository = os.environ.get("GDB_HISTORY_REPOSITORY") or _field(
+        raw, "repository", "validation_history.repository"
+    )
+    graph = os.environ.get("GDB_HISTORY_GRAPH") or _field(
+        raw, "graph", "validation_history.graph"
+    )
+    if not str(base_url).endswith("/"):
+        base_url = f"{base_url}/"
+    return {
+        "base_url": base_url,
+        "repository": repository,
+        "graph": graph,
+        "sparql": str(raw.get("sparql") or "").strip()
+        or f"{base_url.rstrip('/')}/repositories/{repository}",
+        "index": str(raw.get("index") or "").strip() or "index.html",
+        "dashboard_dir": str(raw.get("dashboard_dir") or "").strip() or "dashboard",
+        "keep_timings": int(raw.get("keep_timings") or 2),
+        "keep_results": int(raw.get("keep_results") or 1),
+    }
+
+
+def data_settings(config: dict | None = None) -> dict:
+    """Instance-data GraphDB settings from dashboard-config.json ``data``."""
+    config = config if config is not None else load_config()
+    raw = _section(config, "data")
+    repository = _field(raw, "graphdb_repository", "data.graphdb_repository")
+    base = history_settings(config)["base_url"].rstrip("/")
+    return {
+        "graphdb_repository": repository,
+        "graphdb_resource": str(raw.get("graphdb_resource") or "").strip()
+        or f"{base}/resource",
+        "graphdb_sparql": str(raw.get("graphdb_sparql") or "").strip()
+        or f"{base}/repositories/{repository}",
+        "instance_github_repository": str(
+            raw.get("instance_github_repository") or ""
+        ).strip(),
+    }
+
+
+def export_shell(config: dict | None = None) -> None:
+    """Print ``KEY=value`` lines for ``eval`` in the batch script."""
+    history = history_settings(config)
+    data = data_settings(config)
+    values = {
+        "GDB_URL": history["base_url"],
+        "VALIDATE_REPO": data["graphdb_repository"],
+        "HISTORY_REPO": history["repository"],
+        "HISTORY_GRAPH": history["graph"],
+    }
+    for key, value in values.items():
+        print(f"{key}={shlex.quote(value)}")
+
+
+def list_shacl(config: dict | None = None) -> None:
+    """Print one configured SHACL file path per line, catalog order."""
+    catalog = build_catalog(config)
+    for source in sorted(catalog["sources"].values(), key=lambda item: item["id"]):
+        print(source["shacl_path"])
 
 
 def _prof_record(path: Path) -> dict | None:
@@ -228,9 +324,32 @@ def build_catalog(config: dict | None = None) -> dict:
     return catalog
 
 
-if __name__ == "__main__":
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--export-shell",
+        action="store_true",
+        help="Print GraphDB settings as KEY=value for the batch script",
+    )
+    parser.add_argument(
+        "--list-shacl",
+        action="store_true",
+        help="Print the absolute path of every configured SHACL file",
+    )
+    args = parser.parse_args()
+    if args.export_shell:
+        export_shell()
+        return 0
+    if args.list_shacl:
+        list_shacl()
+        return 0
     built = build_catalog()
     print(
         f"{len(built['repositories'])} repositories, "
         f"{len(built['sources'])} SHACL source files"
     )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -211,11 +211,11 @@ def history_files(history: dict) -> list[str]:
 
 
 def retention(config: dict | None = None) -> tuple[int, int]:
-    """Window sizes from dashboard-config.json, defaulting to (2, 1)."""
-    raw = (config or {}).get("validation_history") or {}
-    keep_timings = int(raw.get("keep_timings") or 2)
-    keep_results = int(raw.get("keep_results") or 1)
-    return max(1, keep_timings), max(1, min(keep_results, max(1, keep_timings)))
+    """Window sizes from dashboard-config.json ``validation_history``."""
+    settings = gs.history_config(config)
+    keep_timings = max(1, int(settings["keep_timings"]))
+    keep_results = max(1, int(settings["keep_results"]))
+    return keep_timings, min(keep_results, keep_timings)
 
 
 def prune_file(
@@ -268,9 +268,9 @@ def parse_args() -> argparse.Namespace:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--keep-timings", type=int, default=0,
-                        help="Runs to keep per SHACL file (default: config, else 2)")
+                        help="Runs to keep per SHACL file (default: validation_history.keep_timings)")
     parser.add_argument("--keep-results", type=int, default=0,
-                        help="Runs that keep their sh:result nodes (default: config, else 1)")
+                        help="Runs that keep their sh:result nodes (default: validation_history.keep_results)")
     parser.add_argument("--file", default="", help="Prune only this SHACL filename")
     parser.add_argument("--auth-header", default="", help='Full header, e.g. "Authorization: Bearer xyz"')
     parser.add_argument("--dry-run", action="store_true",

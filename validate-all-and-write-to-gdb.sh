@@ -1,40 +1,35 @@
 #!/usr/bin/env bash
 # The whole pipeline, end to end:
 #
-#   1. validate every SHACL file in CGMES/NCP against the relicapgrid
-#      repository, one POST per file;
+#   1. validate every configured SHACL file against the instance-data
+#      repository in dashboard-config.json, one POST per file;
 #   2. parse each response and append it to the GraphDB validation-history
 #      graph (write-validation-run-to-gdb.py) -- no report or timing files are
 #      written to disk;
 #   3. re-apply the retention window over the whole graph (gdb_history.py);
 #   4. rebuild the dashboard from that graph (build_dashboard_gdb.py).
 #
+# GraphDB URLs, repositories, the history named graph, and the SHACL file
+# list all come from dashboard-config.json. GDB_BASE_URL,
+# GDB_HISTORY_REPOSITORY, and GDB_HISTORY_GRAPH still override the matching
+# JSON fields.
+#
 # Re-running does not overwrite previous runs, but history is bounded: each
 # SHACL file keeps its last two timings and the validation results of the very
 # last run only, so the dashboard can show the current state and how it differs
 # from the run before it.
 set -euo pipefail
-shopt -s nullglob
 
-APL="$(cd "$(dirname "$0")/../application-profiles-library" && pwd)"
-echo "Application Profiles Library: $APL"
-SHACL_DIRS=(
-  "$APL/CGMES/SHACL"
-  "$APL/NCP/SHACL"
-)
-echo "SHACL Directories: ${SHACL_DIRS[*]}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+eval "$(python3 "$SCRIPT_DIR/dashboard_config.py" --export-shell)"
+: "${GDB_URL:?}" "${VALIDATE_REPO:?}" "${HISTORY_REPO:?}" "${HISTORY_GRAPH:?}"
 
-GDB_URL="${GDB_BASE_URL:-http://localhost:7200/}"
-VALIDATE_REPO="relicapgrid"
+echo "GraphDB: $GDB_URL"
+echo "Validate repository: $VALIDATE_REPO"
+echo "History repository: $HISTORY_REPO"
+echo "History graph: $HISTORY_GRAPH"
+
 VALIDATE_ENDPOINT="${GDB_URL}rest/repositories/${VALIDATE_REPO}/validate/file"
-
-# Repository/named graph the validation-run history is written into. This is
-# deliberately separate from $VALIDATE_REPO (the instance data being
-# validated) -- it accumulates report + timing history over time and is
-# never dropped by this script. Override via env vars if needed.
-HISTORY_REPO="${GDB_HISTORY_REPOSITORY:-cim-shacl}"
-HISTORY_GRAPH="${GDB_HISTORY_GRAPH:-https://github.com/entsoe/application-profiles/SHACL/reports}"
 
 LOG="$SCRIPT_DIR/batch-gdb.log"
 : > "$LOG"
@@ -55,8 +50,8 @@ trap 'rm -rf "$tmp_dir"' EXIT
 done_count=0
 fail_count=0
 
-for dir in "${SHACL_DIRS[@]}"; do
-  for file in "$dir"/*.ttl; do
+while IFS= read -r file; do
+    [[ -n "$file" ]] || continue
     base=$(basename "$file")
     [[ "$base" == "validation-report.ttl" || "$base" == "relicap-val-report.ttl" ]] && continue
 
@@ -98,8 +93,7 @@ for dir in "${SHACL_DIRS[@]}"; do
       echo "[$(date -Iseconds)] FAIL $name (HTTP $http_code, ${duration}s)" | tee -a "$LOG"
       ((fail_count++)) || true
     fi
-  done
-done
+done < <(python3 "$SCRIPT_DIR/dashboard_config.py" --list-shacl)
 
 echo "[$(date -Iseconds)] BATCH COMPLETE: $done_count succeeded, $fail_count failed" | tee -a "$LOG"
 echo "[$(date -Iseconds)] History written to repository '$HISTORY_REPO', named graph <$HISTORY_GRAPH>" | tee -a "$LOG"

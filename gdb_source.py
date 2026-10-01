@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -124,32 +123,12 @@ RUN_CHUNK = 12
 
 
 def history_config(config: dict | None = None) -> dict:
-    """Resolve the history repository/graph from config, then environment.
+    """History GraphDB target from ``dashboard-config.json``.
 
     Environment overrides use the same names as
     ``validate-all-and-write-to-gdb.sh`` so reader and writer stay in step.
     """
-    config = config if config is not None else dc.load_config()
-    raw = config.get("validation_history") or {}
-    base_url = os.environ.get("GDB_BASE_URL") or raw.get("base_url") or "http://localhost:7200/"
-    repository = (
-        os.environ.get("GDB_HISTORY_REPOSITORY") or raw.get("repository") or "cim-shacl"
-    )
-    graph = (
-        os.environ.get("GDB_HISTORY_GRAPH")
-        or raw.get("graph")
-        or "https://github.com/entsoe/application-profiles/SHACL/reports"
-    )
-    return {
-        "base_url": base_url,
-        "repository": repository,
-        "graph": graph,
-        "sparql": raw.get("sparql") or f"{base_url.rstrip('/')}/repositories/{repository}",
-        "index": raw.get("index") or "index.html",
-        "dashboard_dir": raw.get("dashboard_dir") or "dashboard",
-        "keep_timings": int(raw.get("keep_timings") or 2),
-        "keep_results": int(raw.get("keep_results") or 1),
-    }
+    return dc.history_settings(config)
 
 
 def sparql_select(endpoint: str, query: str, timeout: int = 300) -> list[dict]:

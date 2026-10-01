@@ -60,9 +60,7 @@ def _load(name: str, filename: str):
 
 cr = _load("cube_collect_results", "collect-results.py")
 ct = _load("cube_collect_timings", "collect-timings.py")
-INSTANCE_REPO = (dc.load_config().get("data") or {}).get(
-    "instance_github_repository", "entsoe/relicapgrid"
-)
+INSTANCE_REPO = dc.data_settings()["instance_github_repository"]
 
 
 def esc(value: object) -> str:
@@ -408,7 +406,7 @@ def result_item(result: dict, source: dict, index: dict) -> dict:
         "https://github.com/search?q="
         + quote(f"repo:{INSTANCE_REPO} {query_value}")
         + "&type=code"
-        if query_value else ""
+        if query_value and INSTANCE_REPO else ""
     )
     return {
         "severity": severity,

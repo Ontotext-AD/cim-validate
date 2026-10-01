@@ -25,8 +25,9 @@ export GDBPASS=<password>
 
 That single script does everything:
 
-1. **Validate** — POST every SHACL file in CGMES/NCP to the GraphDB validation
-   endpoint for the `relicapgrid` repository, one request per file.
+1. **Validate** — POST every SHACL file listed in `dashboard-config.json` to
+   the GraphDB validation endpoint for `data.graphdb_repository`, one request
+   per file.
 2. **Record** — parse each response with `write-validation-run-to-gdb.py` and
    append it to the validation-history named graph. No `validation-report.ttl`
    or `timing.txt` is ever written to disk.
@@ -40,7 +41,7 @@ flowchart TB
   subgraph inputs["Inputs"]
     APL["application-profiles-library<br/>CGMES/SHACL · NCP/SHACL"]
     CFG["dashboard-config.json"]
-    DATA["GraphDB relicapgrid<br/>instance data"]
+    DATA["GraphDB instance data<br/>data.graphdb_repository"]
   end
 
   subgraph pipeline["validate-all-and-write-to-gdb.sh"]
@@ -50,7 +51,7 @@ flowchart TB
     BD["build_dashboard_gdb.py"]
   end
 
-  subgraph graph["GraphDB cim-shacl"]
+  subgraph graph["GraphDB history repository"]
     HIST[("named graph<br/>…/SHACL/reports")]
   end
 
@@ -182,8 +183,8 @@ parent profile's page directory plus `s/<id>/index.html`.
 
 Links on the drill-down pages:
 
-- `sh:focusNode` → GraphDB resource explorer when the IRI is in `relicapgrid`; otherwise unlinked text.
-- GitHub → code search in `entsoe/relicapgrid` for the same IRI.
+- `sh:focusNode` → GraphDB resource explorer when the IRI is in `data.graphdb_repository`; otherwise unlinked text.
+- GitHub → code search in `data.instance_github_repository` for the same IRI.
 - `sh:sourceConstraint` / shape name → the matching constraint in the profile SHACL file (`CGMES/SHACL` or `NCP/SHACL`).
 
 ### Configuration
@@ -208,27 +209,29 @@ Re-run with higher `validationResultsLimitPerConstraint` /
 
 ## How the runs are produced and stored
 
-Validation runs against the `relicapgrid` repository on a local GraphDB
-instance at [localhost:7200](http://localhost:7200/), which requires
-authentication. `validate-all-and-write-to-gdb.sh` logs in to obtain a bearer
-token, then validates each file:
+Validation runs against the instance-data repository named in
+`data.graphdb_repository` (currently `relicapgrid`) on the GraphDB at
+`validation_history.base_url`, which requires authentication.
+`validate-all-and-write-to-gdb.sh` reads those values from
+`dashboard-config.json`, logs in to obtain a bearer token, then validates
+each configured SHACL file:
 
 ```bash
+eval "$(python3 dashboard_config.py --export-shell)"
 # authenticate and extract the bearer token
-auth_header=$(curl -s 'http://localhost:7200/rest/login/<username>' \
+auth_header=$(curl -s "${GDB_URL}rest/login/<username>" \
   -X POST -H 'X-GraphDB-Password: <password>' -I | grep -i "authorization:")
 token=${auth_header#*: }
 
 # validate a shape file using the token
 curl -X POST --header 'Accept: text/turtle' \
   -H "Authorization: Bearer ${token%$'\r'}" \
-  'http://localhost:7200/rest/repositories/relicapgrid/validate/file' \
+  "${GDB_URL}rest/repositories/${VALIDATE_REPO}/validate/file" \
   -F 'file=@<shape>.ttl;type=text/turtle'
 ```
 
-Each response is parsed and appended immediately into the `cim-shacl`
-repository, named graph
-`https://github.com/entsoe/application-profiles/SHACL/reports`, by
+Each response is parsed and appended immediately into
+`validation_history.repository` / `validation_history.graph` by
 `write-validation-run-to-gdb.py`. Nothing is kept on disk between the
 validation request and the graph write, and the batch is re-runnable — there
 is no resume script, because re-running simply appends fresh runs and the
@@ -311,9 +314,8 @@ an interrupted batch still converges. Pass `--no-prune` to
 Deletion is not reversible. Back the graph up before changing the window:
 
 ```bash
-curl -s -H 'Accept: application/n-quads' \
-  'http://localhost:7200/repositories/cim-shacl/statements?context=%3Chttps%3A%2F%2Fgithub.com%2Fentsoe%2Fapplication-profiles%2FSHACL%2Freports%3E' \
-  -o history-backup.nq
+url=$(python3 -c "import dashboard_config as dc; from urllib.parse import quote; h=dc.history_settings(); print(f\"{h['sparql']}/statements?context={quote('<'+h['graph']+'>')}\")")
+curl -s -H 'Accept: application/n-quads' "$url" -o history-backup.nq
 ```
 
 Two things follow from reading runs out of a graph rather than a folder:
@@ -339,8 +341,8 @@ Configure the source under `validation_history` in `dashboard-config.json`:
 ```
 
 `GDB_BASE_URL`, `GDB_HISTORY_REPOSITORY`, and `GDB_HISTORY_GRAPH` override the
-first three, so reader and writer can be pointed at the same place with one set
-of environment variables.
+first three JSON fields. Scripts do not hardcode a history repository name;
+they read `dashboard-config.json` through `dashboard_config.history_settings()`.
 
 ## Publishing
 

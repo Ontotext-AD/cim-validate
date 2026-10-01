@@ -37,13 +37,10 @@ SHACL_SOURCES = [
     for subpath in family.get("shacl_dirs") or []
 ]
 
-_DATA_CONFIG = CONFIG.get("data") or {}
-GRAPHDB_RESOURCE = _DATA_CONFIG.get("graphdb_resource") or "http://localhost:7200/resource"
-GRAPHDB_REPO = _DATA_CONFIG.get("graphdb_repository") or "relicapgrid"
-GRAPHDB_SPARQL = (
-    _DATA_CONFIG.get("graphdb_sparql")
-    or f"http://localhost:7200/repositories/{GRAPHDB_REPO}"
-)
+_DATA = dc.data_settings(CONFIG)
+GRAPHDB_RESOURCE = _DATA["graphdb_resource"]
+GRAPHDB_REPO = _DATA["graphdb_repository"]
+GRAPHDB_SPARQL = _DATA["graphdb_sparql"]
 GDB_LOOKUP_CHUNK = 100
 
 # Prefixes used only to shorten URIs for display.
@@ -165,7 +162,7 @@ def _sparql_iri(iri: str) -> str:
 
 
 def iris_present_in_graphdb(iris: set[str], chunk: int = GDB_LOOKUP_CHUNK) -> set[str]:
-    """Return the subset of IRIs that appear in relicapgrid as s/p/o/graph."""
+    """Return the subset of IRIs that appear in the configured data repository."""
     found: set[str] = set()
     ordered = [i for i in iris if i and not i.startswith("_:")]
     if not ordered:
