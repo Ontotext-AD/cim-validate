@@ -1,19 +1,15 @@
-name: Publish dashboard
+name: Build dashboard
 
-# The dashboard is built from the GraphDB validation-history graph, which only
-# exists on the machine that runs the validation batch. CI therefore publishes
-# the dashboard committed by `validate-all-and-write-to-gdb.sh`; it does not
-# rebuild it and it does not rerun SHACL validation.
+# Runs on the self-hosted runner installed on the GraphDB host. localhost:7200
+# there is the instance that holds the validation-history graph and the
+# relicapgrid data, so the build can read both. This does not rerun SHACL
+# validation. After a batch, start this workflow manually (workflow_dispatch)
+# to republish the pages from the graph.
 
 on:
   push:
     branches:
       - main
-    paths:
-      - index.html
-      - dashboard.css
-      - dashboard/**
-      - .github/workflows/dashboard.yml
   workflow_dispatch: {}
 
 permissions:
@@ -26,22 +22,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  publish-dashboard:
-    runs-on: ubuntu-latest
+  build-dashboard:
+    runs-on: self-hosted
     steps:
-      - name: Checkout dashboard
+      - name: Checkout evaluation results
         uses: actions/checkout@v5
+        with:
+          path: relicap-ap-shacl-eval
+
+      - name: Checkout application profiles library
+        uses: actions/checkout@v5
+        with:
+          repository: entsoe/application-profiles-library
+          ref: main
+          path: application-profiles-library
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Stage committed dashboard
+      - name: Build dashboard from GraphDB
+        working-directory: relicap-ap-shacl-eval
+        run: python3 build_dashboard_gdb.py
+
+      - name: Stage dashboard
         run: |
-          test -f index.html || { echo "index.html is missing; run build_dashboard_gdb.py and commit the result" >&2; exit 1; }
-          test -d dashboard || { echo "dashboard/ is missing; run build_dashboard_gdb.py and commit the result" >&2; exit 1; }
           mkdir -p _site
-          cp index.html dashboard.css _site/
-          cp -R dashboard _site/
+          cp relicap-ap-shacl-eval/index.html _site/
+          cp relicap-ap-shacl-eval/dashboard.css _site/
+          cp -R relicap-ap-shacl-eval/dashboard _site/
 
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v4
@@ -53,7 +61,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
-    needs: publish-dashboard
+    needs: build-dashboard
     steps:
       - name: Deploy dashboard
         id: deployment
