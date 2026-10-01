@@ -35,6 +35,16 @@ jobs:
           ref: main
           path: application-profiles-library
 
+      - name: Debug network reachability
+        run: |
+          echo "--- localhost ---"
+          curl -v http://localhost:7200/rest/repositories || true
+          echo "--- public URL ---"
+          curl -v https://cim.ontotext.com/graphdb/rest/repositories || true
+          echo "--- what am I ---"
+          cat /proc/1/cgroup 2>/dev/null | head -5 || true
+          hostname
+          
       - name: Build dashboard from GraphDB
         working-directory: relicap-ap-shacl-eval
         run: python3 build_dashboard_gdb.py
