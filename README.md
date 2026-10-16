@@ -9,7 +9,7 @@ is rendered as a browsable static dashboard.
 
 ## Links
 
-- **Shapes** — [`entsoe/application-profiles-library`](https://github.com/entsoe/application-profiles-library/tree/main), specifically [`CGMES/CurrentRelease/SHACL/`](https://github.com/entsoe/application-profiles-library/tree/main/CGMES/CurrentRelease/SHACL) and [`NCP/CurrentRelease/SHACL/`](https://github.com/entsoe/application-profiles-library/tree/main/NCP/CurrentRelease/SHACL).
+- **Shapes** — [`entsoe/CGMES-AP`](https://github.com/entsoe/CGMES-AP) (`CGMES/SHACL`) and [`entsoe/NC-AP`](https://github.com/entsoe/NC-AP) (`NCP/SHACL`).
 - **Data** — [`entsoe/relicapgrid`](https://github.com/entsoe/relicapgrid),
   loaded into the GraphDB repository
   [`relicapgrid` on a local GraphDB instance](http://localhost:7200/).
@@ -39,7 +39,7 @@ That single script does everything:
 ```mermaid
 flowchart TB
   subgraph inputs["Inputs"]
-    APL["application-profiles-library<br/>CGMES/SHACL · NCP/SHACL"]
+    APL["entsoe/CGMES-AP · entsoe/NC-AP<br/>CGMES/SHACL · NCP/SHACL"]
     CFG["dashboard-config.json"]
     DATA["GraphDB instance data<br/>data.graphdb_repository"]
   end

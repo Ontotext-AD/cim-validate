@@ -26,7 +26,7 @@ documentation.
 | Dashboard output | Static HTML + CSS + small inline JavaScript |
 | Styling | `dashboard.css` — Prime/Bootstrap design tokens, Rubik font, gray ground, white cards |
 | Hosting | GitHub Pages, deploying the committed `index.html` + `dashboard/` |
-| External repos | [`entsoe/application-profiles-library`](https://github.com/entsoe/application-profiles-library) (SHACL shapes), [`entsoe/relicapgrid`](https://github.com/entsoe/relicapgrid) (instance data) |
+| External repos | [`entsoe/CGMES-AP`](https://github.com/entsoe/CGMES-AP) and [`entsoe/NC-AP`](https://github.com/entsoe/NC-AP) (SHACL shapes), [`entsoe/relicapgrid`](https://github.com/entsoe/relicapgrid) (instance data) |
 | GraphDB links | Resource explorer + SPARQL presence lookup; GraphDB link omitted when IRI absent |
 
 There is no test suite. Correctness is verified by rebuilding the dashboard and

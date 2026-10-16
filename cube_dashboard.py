@@ -965,7 +965,9 @@ def cube_node_json(scope: dict) -> dict:
         "name": scope["name"],
         **{key: scope.get(key) for key in METRICS},
     }
-    if scope.get("children"):
+    # An aggregate can have an empty child list (a profile whose SHACL files
+    # declare no shapes). That is not a shape leaf, and it has no "run".
+    if "children" in scope:
         record.update({
             "level": scope["level"],
             "page": scope["page"].relative_to(ROOT).as_posix(),
@@ -1024,6 +1026,21 @@ def build(
     INDEX = index_path or ROOT / "index.html"
     config = dc.load_config()
     catalog = dc.build_catalog(config)
+    if not catalog["sources"]:
+        looked = []
+        for repo in catalog["repositories"]:
+            dirs = [
+                directory
+                for family in repo.get("families") or []
+                for directory in (family.get("shacl_dirs") or [])
+            ]
+            looked.append(f"{repo['checkout_path']} [{', '.join(dirs)}]")
+        raise SystemExit(
+            "No configured SHACL files were found under "
+            + "; ".join(looked)
+            + ". Clone entsoe/CGMES-AP and entsoe/NC-AP at the configured "
+            "checkout paths before building."
+        )
     index = cr.build_shacl_index()
     if DASH.exists():
         shutil.rmtree(DASH)

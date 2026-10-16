@@ -15,6 +15,10 @@ from urllib.parse import unquote, urlparse
 
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "dashboard-config.json"
+# Older checkouts keep both families in one tree. Each family still uses the
+# same relative directories as entsoe/CGMES-AP and entsoe/NC-AP (CGMES/SHACL,
+# NCP/SHACL), so that tree can stand in when the dedicated clone is absent.
+LEGACY_CHECKOUT = (ROOT / "../application-profiles-library").resolve()
 
 RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 DCT = "http://purl.org/dc/terms/"
@@ -57,7 +61,7 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
         if not repo_id or repo_id in seen_repos:
             raise ValueError(f"Repository id is missing or duplicated: {repo_id!r}")
         seen_repos.add(repo_id)
-        repo["checkout_path"] = (ROOT / str(repo["checkout"])).resolve()
+        repo["checkout_path"] = resolve_checkout(str(repo["checkout"]))
         seen_families: set[str] = set()
         for family in repo.get("families") or []:
             family_id = str(family.get("id") or "")
@@ -73,6 +77,22 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
     _field(raw["validation_history"], "repository", "validation_history.repository")
     _field(raw["validation_history"], "graph", "validation_history.graph")
     return raw
+
+
+def resolve_checkout(checkout: str) -> Path:
+    """Directory that contains this repository's ``CGMES/`` or ``NCP/`` tree.
+
+    ``checkout`` is relative to this repository, for example ``../CGMES-AP``.
+    A combined ``application-profiles-library`` checkout is used when that
+    directory is not present: the SHACL, RDFS, and PROF paths inside it are
+    the same ones published by entsoe/CGMES-AP and entsoe/NC-AP.
+    """
+    path = (ROOT / checkout).resolve()
+    if path.is_dir():
+        return path
+    if LEGACY_CHECKOUT.is_dir():
+        return LEGACY_CHECKOUT
+    return path
 
 
 def _section(raw: dict, name: str) -> dict:

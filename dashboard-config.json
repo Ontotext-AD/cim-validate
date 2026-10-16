@@ -17,10 +17,10 @@
   },
   "repositories": [
     {
-      "id": "application-profiles-library",
-      "title": "ENTSO-E Application Profiles Library",
-      "checkout": "../application-profiles-library",
-      "github_repository": "entsoe/application-profiles-library",
+      "id": "cgmes-ap",
+      "title": "CGMES Application Profiles",
+      "checkout": "../CGMES-AP",
+      "github_repository": "entsoe/CGMES-AP",
       "github_ref": "main",
       "families": [
         {
@@ -39,7 +39,16 @@
             "CGMES/PROF"
           ],
           "profile_overrides": {}
-        },
+        }
+      ]
+    },
+    {
+      "id": "nc-ap",
+      "title": "Network Code Application Profiles",
+      "checkout": "../NC-AP",
+      "github_repository": "entsoe/NC-AP",
+      "github_ref": "main",
+      "families": [
         {
           "id": "NCP",
           "title": "NCP",
