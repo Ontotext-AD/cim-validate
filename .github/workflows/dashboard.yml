@@ -28,12 +28,19 @@ jobs:
         with:
           path: relicap-ap-shacl-eval
 
-      - name: Checkout application profiles library
+      - name: Checkout CGMES application profiles
         uses: actions/checkout@v5
         with:
-          repository: entsoe/application-profiles-library
+          repository: entsoe/CGMES-AP
           ref: main
-          path: application-profiles-library
+          path: CGMES-AP
+
+      - name: Checkout network code application profiles
+        uses: actions/checkout@v5
+        with:
+          repository: entsoe/NC-AP
+          ref: main
+          path: NC-AP
 
       - name: Debug network reachability
         run: |
