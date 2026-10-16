@@ -70,21 +70,37 @@ import dashboard_config as dc
 
 EX = Namespace("http://example.org/ns#")
 SH = Namespace("http://www.w3.org/ns/shacl#")
+RDF4J = Namespace("http://rdf4j.org/schema/rdf4j#")
 
 # Keep the report subject, its direct properties, and -- one level deeper --
-# the properties of any blank node it points to (e.g. each sh:result), while
-# dropping the rsx:shapesGraph -> rdf4j:nil bookkeeping triple that carries
-# no history value.
+# the properties of any blank node it points to (e.g. each sh:result).
+# ``rsx:shapesGraph rdf4j:nil`` is removed first; see drop_nil_bookkeeping().
 CLEAN_QUERY = """
     PREFIX sh: <http://www.w3.org/ns/shacl#>
-    PREFIX rdf4j: <http://rdf4j.org/schema/rdf4j#>
     SELECT * WHERE {
         ?s a sh:ValidationReport .
         ?s ?p ?o .
         OPTIONAL { ?o ?pp ?oo . }
-        MINUS { ?o ?pp rdf4j:nil . }
     }
 """
+
+
+def drop_nil_bookkeeping(graph: Graph) -> int:
+    """Remove ``?o ?pp rdf4j:nil`` triples hanging off the validation report.
+
+    GraphDB repeats ``rsx:shapesGraph rdf4j:nil`` on every ``sh:ValidationResult``.
+    Those triples carry no history value. Removing them in Python replaces the
+    SPARQL ``MINUS`` that used to do it: rdflib evaluates ``MINUS`` as a nested
+    loop over every result, which does not finish on a report of this size.
+    """
+    removed = 0
+    nil = RDF4J.nil
+    for report in list(graph.subjects(RDF.type, SH.ValidationReport)):
+        for obj in list(graph.objects(report, None)):
+            for triple in list(graph.triples((obj, None, nil))):
+                graph.remove(triple)
+                removed += 1
+    return removed
 
 
 def parse_args() -> argparse.Namespace:
@@ -265,6 +281,7 @@ def main() -> int:
         print(f"RUN {meta['file']} @ {meta['finished_at']}: execution error recorded")
         return 1
 
+    drop_nil_bookkeeping(graph)
     cleaned = get_cleaned_report_graph(graph)
     cleaned = append_run_metadata(graph, cleaned, meta)
     n_results = len(list(cleaned.objects(predicate=SH.result)))
