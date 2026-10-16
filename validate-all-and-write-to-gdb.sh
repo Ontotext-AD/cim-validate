@@ -39,13 +39,30 @@ LOG="$SCRIPT_DIR/batch-gdb.log"
 : "${GDBPASS:?GDBPASS env var must be set}"
 
 GDB_AUTH_URL="${GDB_URL}rest/login/${GDBUSER}"
-auth_header=$(curl -s "$GDB_AUTH_URL" -X POST -H "X-GraphDB-Password: $GDBPASS" -I | grep -i "authorization:")
-token=${auth_header#*: }
-token=${token%$'\r'}
-AUTH_HEADER="Authorization: Bearer $token"
-
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
+login_headers="$tmp_dir/login.headers"
+login_body="$tmp_dir/login.body"
+login_code=$(curl -sS -D "$login_headers" -o "$login_body" -X POST \
+  -H "X-GraphDB-Password: $GDBPASS" \
+  -w "%{http_code}" \
+  "$GDB_AUTH_URL" || true)
+auth_header=$(grep -i "^authorization:" "$login_headers" || true)
+auth_header=${auth_header%$'\r'}
+if [[ -z "$auth_header" ]]; then
+  echo "GraphDB login failed: HTTP ${login_code:-curl error} from $GDB_AUTH_URL" | tee -a "$LOG"
+  if [[ -s "$login_body" ]]; then
+    cat "$login_body" | tee -a "$LOG"
+    echo | tee -a "$LOG"
+  fi
+  echo "Export GDBUSER and GDBPASS for an account that can log in to this GraphDB, then re-run." | tee -a "$LOG"
+  exit 1
+fi
+# GraphDB returns the scheme with the token (Authorization: GDB <jwt>).
+# Send that value back unchanged.
+token=${auth_header#*: }
+token=${token#"${token%%[![:space:]]*}"}
+AUTH_HEADER="Authorization: $token"
 
 done_count=0
 fail_count=0
