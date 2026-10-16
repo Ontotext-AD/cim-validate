@@ -61,7 +61,12 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
         if not repo_id or repo_id in seen_repos:
             raise ValueError(f"Repository id is missing or duplicated: {repo_id!r}")
         seen_repos.add(repo_id)
-        repo["checkout_path"] = resolve_checkout(str(repo["checkout"]))
+        shacl_dirs = [
+            directory
+            for family in repo.get("families") or []
+            for directory in (family.get("shacl_dirs") or [])
+        ]
+        repo["checkout_path"] = resolve_checkout(str(repo["checkout"]), shacl_dirs)
         seen_families: set[str] = set()
         for family in repo.get("families") or []:
             family_id = str(family.get("id") or "")
@@ -79,18 +84,29 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
     return raw
 
 
-def resolve_checkout(checkout: str) -> Path:
+def _has_shacl(path: Path, shacl_dirs: list[str]) -> bool:
+    for directory in shacl_dirs:
+        if any((path / directory).glob("*.ttl")):
+            return True
+    return False
+
+
+def resolve_checkout(checkout: str, shacl_dirs: list[str] | None = None) -> Path:
     """Directory that contains this repository's ``CGMES/`` or ``NCP/`` tree.
 
     ``checkout`` is relative to this repository, for example ``../CGMES-AP``.
-    A combined ``application-profiles-library`` checkout is used when that
-    directory is not present: the SHACL, RDFS, and PROF paths inside it are
-    the same ones published by entsoe/CGMES-AP and entsoe/NC-AP.
+    A combined ``application-profiles-library`` checkout is used only when the
+    configured directory is absent and that older tree actually contains SHACL
+    files. An empty checkout — ``entsoe/application-profiles-library`` without
+    its ``CGMES`` and ``NCP`` submodules — is not a substitute.
     """
+    dirs = shacl_dirs or ["CGMES/SHACL", "NCP/SHACL"]
     path = (ROOT / checkout).resolve()
+    if _has_shacl(path, dirs):
+        return path
     if path.is_dir():
         return path
-    if LEGACY_CHECKOUT.is_dir():
+    if _has_shacl(LEGACY_CHECKOUT, dirs):
         return LEGACY_CHECKOUT
     return path
 

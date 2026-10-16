@@ -42,6 +42,36 @@ jobs:
           ref: main
           path: NC-AP
 
+      # The eval repo is checked out into relicap-ap-shacl-eval/, so
+      # dashboard-config.json's ../CGMES-AP and ../NC-AP are these siblings.
+      # A previous job left application-profiles-library here; that checkout
+      # has no SHACL files unless its submodules are fetched.
+      - name: Check shape checkouts
+        working-directory: relicap-ap-shacl-eval
+        run: |
+          rm -rf ../application-profiles-library
+          python3 - <<'PY'
+          import dashboard_config as dc
+          config = dc.load_config()
+          missing = []
+          for repo in config["repositories"]:
+              path = repo["checkout_path"]
+              print(f"{repo['id']}: {repo['checkout']} -> {path}")
+              count = 0
+              for family in repo.get("families") or []:
+                  for directory in family.get("shacl_dirs") or []:
+                      files = list((path / directory).glob("*.ttl"))
+                      print(f"  {directory}: {len(files)} file(s)")
+                      count += len(files)
+              if count == 0:
+                  missing.append(f"{repo['id']} ({repo['checkout']} -> {path})")
+          if missing:
+              raise SystemExit(
+                  "No SHACL files in " + "; ".join(missing)
+                  + ". Expected siblings ../CGMES-AP and ../NC-AP of this checkout."
+              )
+          PY
+
       - name: Debug network reachability
         run: |
           echo "--- localhost ---"
