@@ -351,16 +351,10 @@ they read `dashboard-config.json` through `dashboard_config.history_settings()`.
 
 ## Publishing
 
-Building the dashboard needs the local GraphDB, which CI does not have, so the
-generated `index.html` and `dashboard/` are committed and
-`.github/workflows/dashboard.yml` only copies them to GitHub Pages. A pipeline
-run becomes visible once its output is committed:
-
-```bash
-./validate-all-and-write-to-gdb.sh
-git add index.html dashboard
-git commit -m "Refresh dashboard"
-```
+`.github/workflows/dashboard.yml` rebuilds `index.html` and `dashboard/` on the
+runner from the GraphDB history graph and publishes that copy. Those generated
+files are git-ignored. `dashboard.css` is the tracked stylesheet copied alongside
+them.
 
 Preview locally over HTTP (not `file://`, which blocks relative navigation):
 

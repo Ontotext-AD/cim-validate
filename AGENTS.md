@@ -25,7 +25,7 @@ documentation.
 | Batch orchestration | Bash (`validate-all-and-write-to-gdb.sh`) |
 | Dashboard output | Static HTML + CSS + small inline JavaScript |
 | Styling | `dashboard.css` — Prime/Bootstrap design tokens, Rubik font, gray ground, white cards |
-| Hosting | GitHub Pages, deploying the committed `index.html` + `dashboard/` |
+| Hosting | GitHub Pages. The workflow rebuilds `index.html` + `dashboard/` on the runner and publishes that copy. Those files are git-ignored. |
 | External repos | [`entsoe/CGMES-AP`](https://github.com/entsoe/CGMES-AP) and [`entsoe/NC-AP`](https://github.com/entsoe/NC-AP) (SHACL shapes), [`entsoe/relicapgrid`](https://github.com/entsoe/relicapgrid) (instance data) |
 | GraphDB links | Resource explorer + SPARQL presence lookup; GraphDB link omitted when IRI absent |
 
@@ -49,7 +49,7 @@ relicap-ap-shacl-eval/
 ├── dashboard.css                 # shared styles (referenced with relative paths)
 ├── validation-result-model.ttl   # the shape of what the writer puts in the graph
 ├── index.html                    # landing dashboard (generated, committed)
-└── dashboard/                    # generated drill-down pages (committed; safe to rebuild)
+└── dashboard/                    # generated drill-down pages (git-ignored; rebuilt on the runner)
     ├── cube.json                 # whole cube, one machine-readable artifact
     ├── runs/                     # run history with per-file Δ against the previous run
     ├── all/rows.json             # sort payload for the landing page
@@ -460,12 +460,10 @@ When changing link behaviour, update both the implementation and the meta text o
 
 ## CI
 
-`.github/workflows/dashboard.yml` **publishes, it does not build.** The
-dashboard is generated from the GraphDB history graph, which exists only on the
-machine that runs the batch, so the generated `index.html` + `dashboard/` are
-committed and CI copies them into `_site` alongside `dashboard.css` and deploys
-to GitHub Pages. It does not check out the shapes library, does not run Python,
-and does not rerun SHACL validation.
+`.github/workflows/dashboard.yml` rebuilds the dashboard on the self-hosted
+runner, where the GraphDB history graph is reachable, then copies the generated
+`index.html` and `dashboard/` into `_site` alongside `dashboard.css` and deploys
+that copy to GitHub Pages. It does not rerun SHACL validation.
 
-This means a pipeline run is only published once its output is committed. After
-`./validate-all-and-write-to-gdb.sh`, commit `index.html` and `dashboard/`.
+`index.html` and `dashboard/` are git-ignored. Do not commit them. A published
+update is the workflow run, not a commit of generated pages.

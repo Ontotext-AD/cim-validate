@@ -1097,14 +1097,12 @@ def build(
 
     cube_json = write_cube_json(cube)
     root_meta = (
-        "Configured shape repositories. Every measure links to the next level where it is grounded. "
-        "Timing sum/max use unique SHACL-file validation runs.<br>"
-        "Click any column header to reorder the table by that measure; the order is kept in the "
-        f'page address so a sorted view can be shared. Full cube data: '
-        f'<a href="{esc(rel(INDEX.parent, cube_json))}">cube.json</a>.'
+        "Configured shape repositories. Timing sum/max use unique SHACL-file validation runs.<br>\n"
+        "Click any column header to reorder the table by that measure<br>\n"
+        f'Full cube data: <a href="{esc(rel(INDEX.parent, cube_json))}">cube.json</a>.'
     )
     if source_note:
-        root_meta = f"{root_meta}<br>{source_note}"
+        root_meta = f"{root_meta}<br>\n{source_note}"
     write_scope_pages(cube, [], "Repository", root_meta)
     for repo in cube["children"]:
         repo_cfg = repo["repo"]

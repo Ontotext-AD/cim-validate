@@ -204,7 +204,7 @@ def comparison_note(snapshot: dict, runs_page: Path) -> str:
         f'the results of the newest {history["keep_results"]}.'
     )
     if not compared:
-        return f"{retention} No previous run to compare against yet."
+        return f"{retention} <br>\nNo previous run to compare against yet."
     slower = sum(1 for run in compared if run["duration_delta"] >= DELTA_EPSILON)
     faster = sum(1 for run in compared if run["duration_delta"] <= -DELTA_EPSILON)
     unchanged = len(compared) - slower - faster
@@ -214,7 +214,8 @@ def comparison_note(snapshot: dict, runs_page: Path) -> str:
         breakdown += f", {unchanged} unchanged"
     direction = "slower" if net > 0 else "faster"
     return (
-        f"{retention} Against the previous run, {len(compared)} of "
+        f"{retention} <br>\n"
+        f"Against the previous run, {len(compared)} of "
         f'{len(snapshot["selected"])} files are comparable: {breakdown}, '
         f"{cd.ct.format_duration(abs(net))} {direction} overall "
         f'(<a href="{cd.esc(cd.rel(ROOT, runs_page))}">per-file &Delta;</a>).'
@@ -232,17 +233,17 @@ def source_note(snapshot: dict, runs_page: Path, unmatched: set[str]) -> str:
         f'named graph <code>{cd.esc(history["graph"])}</code> — '
         f'{snapshot["run_total"]} runs recorded for {len(snapshot["by_file"])} SHACL files, '
         f'one {scope} per file '
-        f'(<a href="{cd.esc(cd.rel(ROOT, runs_page))}">run history</a>).'
+        f'(<a href="{cd.esc(cd.rel(ROOT, runs_page))}">run history</a>). <br>\n'
     )
-    note += " " + comparison_note(snapshot, runs_page)
+    note += comparison_note(snapshot, runs_page)
     if snapshot["unresolved"]:
         note += (
-            f' {snapshot["unresolved"]} report(s) in the graph carry no <code>ex:file</code> '
+            f' <br>\n{snapshot["unresolved"]} report(s) in the graph carry no <code>ex:file</code> '
             "and cannot be attributed to a SHACL file; their results are excluded."
         )
     if unmatched:
         note += (
-            f' {len(unmatched)} run(s) name a SHACL file that is not in the configured '
+            f' <br>\n{len(unmatched)} run(s) name a SHACL file that is not in the configured '
             "checkout and are excluded."
         )
     return note
