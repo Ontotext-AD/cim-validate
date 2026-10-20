@@ -3,7 +3,8 @@
 
 Runs are read out of the validation-history named graph filled by
 ``validate-all-and-write-to-gdb.sh`` and rendered through the repository →
-family → ontology profile → individual shape cube in ``cube_dashboard.py``.
+family → ontology profile → SHACL file → individual shape cube in
+``cube_dashboard.py``.
 Output goes to ``index.html`` and ``dashboard/``, configured under
 ``validation_history`` in ``dashboard-config.json``.
 

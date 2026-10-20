@@ -62,7 +62,9 @@ relicap-ap-shacl-eval/
             ├── m/execution_err/
             └── p/<PROFILE>/
                 ├── rows.json
-                └── s/<SHAPE>/    # source grounding + focus-node evidence
+                └── sf/<SHACL-FILE>/
+                    ├── rows.json
+                    └── s/<SHAPE>/    # source grounding + focus-node evidence
 ```
 
 `collect-results.py` and `collect-timings.py` are **libraries, not pipeline
@@ -92,8 +94,8 @@ The dashboard is fully pre-rendered HTML. There is no server-side runtime.
 1. Deletes and recreates `dashboard/`.
 2. Loads configured repositories/families and PROF-derived profile mappings.
 3. Reads each run from the injected source and parses each declared SHACL shape.
-4. Builds individual-shape leaves and rolls them up through ontology profile,
-   family, repository, and global scopes.
+4. Builds individual-shape leaves and rolls them up through SHACL file,
+   ontology profile, family, repository, and global scopes.
 5. Asserts validation sums and unique timing-run identities at every boundary.
 6. Queries GraphDB (SPARQL) to decide focus-node link targets and writes pages.
 
@@ -126,7 +128,7 @@ orders.
   `p<n>.html` pages fully usable.
 - `write_cube_json()` emits `dashboard/cube.json`, the whole cube as one
   artifact for cross-cutting questions. No page reads it. Shape entries omit
-  `page` because it is always the parent profile's page directory plus
+  `page` because it is always the parent SHACL file's page directory plus
   `s/<id>/index.html`, and spelling out 13k long paths costs more than the rest
   of the file.
 
@@ -184,12 +186,15 @@ index.html
   └── dashboard/r/<REPOSITORY>/index.html
         └── f/<FAMILY>/index.html
               └── p/<ONTOLOGY-PROFILE>/index.html
-                    └── s/<INDIVIDUAL-SHAPE>/index.html
+                    └── sf/<SHACL-FILE>/index.html
+                          └── s/<INDIVIDUAL-SHAPE>/index.html
 ```
 
 - Each non-zero aggregate measure links to the next level down with
   `#sort=<METRIC>`, which loads that page already ordered by the measure.
 - Ontology-profile frontmatter links the mapped RDFS artifact on GitHub.
+- SHACL-file frontmatter links that file on GitHub. Its table lists the
+  declared shapes and sorts like every aggregate above it.
 - Individual-shape frontmatter links the exact SHACL declaration line.
 - Shape error/warning counts link to focus-node evidence; distinct/good/total
   counts link to source grounding.

@@ -124,17 +124,22 @@ relicap-ap-shacl-eval/
 
 ## The dashboard
 
-`build_dashboard_gdb.py` writes a four-dimensional static cube:
+`build_dashboard_gdb.py` writes a static cube:
 
 ```
-all repositories → repository → family → ontology profile → individual SHACL shape
+all repositories → repository → family → ontology profile → SHACL file → individual SHACL shape
 ```
 
 - `index.html` contains one aggregation row per configured shapes repository.
 - `dashboard/r/<repository>/index.html` aggregates its configured families.
 - `dashboard/r/<repository>/f/<family>/index.html` aggregates ontology profiles.
-- `dashboard/r/<repository>/f/<family>/p/<profile>/index.html` shows individual
-  shapes. The frontmatter links to the profile's RDFS ontology on GitHub.
+- `dashboard/r/<repository>/f/<family>/p/<profile>/index.html` aggregates the
+  profile's SHACL files. The frontmatter links to the profile's RDFS ontology
+  on GitHub.
+- `.../sf/<file>/index.html` lists that file's individual shapes, with the same
+  measures and column sorting as the levels above. The frontmatter links to
+  the SHACL file on GitHub. Each shape row repeats the file's validation time;
+  the file total counts that run once.
 - `.../s/<shape>/index.html` grounds one shape. Its frontmatter links to the exact
   SHACL declaration line; error and warning counts open focus-node evidence.
 
@@ -179,7 +184,7 @@ their `p<n>.html` pages work exactly as before.
 `dashboard/cube.json` holds the whole cube — every repository, family, profile,
 and shape with all measures — for cross-cutting questions that no single page
 answers. Pages do not read it. Shape entries carry no `page`: it is always the
-parent profile's page directory plus `s/<id>/index.html`.
+parent SHACL file's page directory plus `s/<id>/index.html`.
 
 Links on the drill-down pages:
 

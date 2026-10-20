@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repository → family → ontology profile → SHACL shape static dashboard."""
+"""Repository → family → ontology profile → SHACL file → shape dashboard."""
 from __future__ import annotations
 
 import hashlib
@@ -530,6 +530,44 @@ def node(node_id: str, name: str, children: list[dict], **extra) -> dict:
     return {"id": node_id, "name": name, "children": children, **aggregate(children), **extra}
 
 
+def _unique_id(stem: str, used: set[str]) -> str:
+    base = dc.slug(stem)
+    candidate = base
+    suffix = 2
+    while candidate in used:
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+    used.add(candidate)
+    return candidate
+
+
+def _file_nodes(leaves: list[dict], profile_runs: dict[str, dict]) -> list[dict]:
+    """Group a profile's shapes under one node per SHACL file."""
+    by_file: dict[str, list[dict]] = {}
+    for leaf in leaves:
+        by_file.setdefault(leaf["run"]["shacl_file"], []).append(leaf)
+    for run in profile_runs.values():
+        by_file.setdefault(run["shacl_file"], [])
+    used: set[str] = set()
+    files = []
+    for shacl_file, file_leaves in by_file.items():
+        sample = file_leaves[0]["run"] if file_leaves else next(
+            run for run in profile_runs.values() if run["shacl_file"] == shacl_file
+        )
+        shacl_file_node = node(
+            _unique_id(Path(shacl_file).stem, used),
+            shacl_file,
+            sorted(file_leaves, key=lambda item: item["name"].lower()),
+            level="file",
+            shacl_file=shacl_file,
+            shacl_subpath=sample["shacl_subpath"],
+            repo=sample["repo"],
+        )
+        shacl_file_node.update(aggregate(file_leaves, {sample["id"]: sample}))
+        files.append(shacl_file_node)
+    return sorted(files, key=lambda item: item["name"].lower())
+
+
 def build_cube(catalog: dict, runs: list[dict]) -> dict:
     by_repo: dict[str, dict[str, dict[str, list[dict]]]] = {}
     runs_by_profile: dict[tuple[str, str, str], dict[str, dict]] = {}
@@ -555,18 +593,19 @@ def build_cube(catalog: dict, runs: list[dict]) -> dict:
             }
             for profile_id, leaves in profiles_data.items():
                 source = source_profiles[profile_id]
+                profile_runs = runs_by_profile[(repository_id, family_id, profile_id)]
+                files = _file_nodes(leaves, profile_runs)
                 profile = node(
                     profile_id,
                     source["profile_name"],
-                    leaves,
+                    files,
                     level="profile",
-                    extra_runs=runs_by_profile[(repository_id, family_id, profile_id)],
                     ontology_file=source["ontology_file"],
                     ontology_subpath=source["ontology_subpath"],
                     repo=config_repo,
                 )
-                # node() aggregates before extra attributes; replace timing with all profile runs.
-                profile.update(aggregate(leaves, runs_by_profile[(repository_id, family_id, profile_id)]))
+                # Include a file run that declared no shapes in the profile timing.
+                profile.update(aggregate(files, profile_runs))
                 profiles.append(profile)
             family = node(
                 family_id,
@@ -594,7 +633,8 @@ def assert_rollups(parent: dict, path: str = "all") -> None:
         actual = sum(int(child[key]) for child in children)
         if actual != int(parent[key]):
             raise AssertionError(f"{path}: {key}={parent[key]}, children sum to {actual}")
-    if parent.get("level") != "profile":
+    # Shape leaves do not carry execution_err; that measure lives on the file run.
+    if parent.get("level") != "file":
         execution_errors = sum(int(child["execution_err"]) for child in children)
         if execution_errors != int(parent["execution_err"]):
             raise AssertionError(
@@ -701,9 +741,9 @@ def cube_table(scope: dict, children: list[dict], out_dir: Path, first_label: st
 <thead>
 <tr>
 <th class="profile sortable" rowspan="2" data-sort="name">{esc(first_label)}</th>
-<th class="num" colspan="2">Timing</th>
-<th class="num group-err" colspan="2">{ICON["Violation"]} Errors</th>
-<th class="num group-warn" colspan="2">{ICON["Warning"]} Warnings</th>
+<th class="num sortable" colspan="2" data-sort="time_sum">Timing</th>
+<th class="num group-err sortable" colspan="2" data-sort="v_count">{ICON["Violation"]} Errors</th>
+<th class="num group-warn sortable" colspan="2" data-sort="w_count">{ICON["Warning"]} Warnings</th>
 <th class="num sortable" rowspan="2" data-sort="g_count">{ICON["Good"]} Good</th>
 <th class="num sortable" rowspan="2" data-sort="t_count">Total</th>
 </tr>
@@ -955,8 +995,13 @@ def assign_pages(cube: dict) -> None:
                 profile["page"] = family["page"].parent / "p" / profile["id"] / "index.html"
                 profile["metric_dir"] = profile["page"].parent / "m"
                 profile["rows_json"] = profile["page"].parent / "rows.json"
-                for leaf in profile["children"]:
-                    leaf["page"] = profile["page"].parent / "s" / leaf["id"] / "index.html"
+                for shacl_file in profile["children"]:
+                    shacl_file["page"] = (
+                        profile["page"].parent / "sf" / shacl_file["id"] / "index.html"
+                    )
+                    shacl_file["rows_json"] = shacl_file["page"].parent / "rows.json"
+                    for leaf in shacl_file["children"]:
+                        leaf["page"] = shacl_file["page"].parent / "s" / leaf["id"] / "index.html"
 
 
 def cube_node_json(scope: dict) -> dict:
@@ -975,7 +1020,7 @@ def cube_node_json(scope: dict) -> dict:
             "children": [cube_node_json(child) for child in scope["children"]],
         })
     else:
-        # Shape pages carry no "page": they are always the parent profile's
+        # Shape pages carry no "page": they are always the parent SHACL file's
         # page directory + s/<id>/index.html, and spelling out 13k long paths
         # costs more than the whole rest of the file.
         run = scope["run"]
@@ -1088,13 +1133,27 @@ def build(
                 write_scope_pages(
                     profile,
                     profile_crumbs,
-                    "Individual shape",
-                    f"Ontology: {ontology}. Timing aggregates unique SHACL-file runs; "
-                    "shape rows repeat their containing file-run time.",
+                    "SHACL file",
+                    f"Ontology: {ontology}. Each row is one SHACL file. "
+                    "Timing is that file's validation run.",
                 )
-                shape_crumbs = profile_crumbs + [(profile["name"], profile["page"])]
-                for leaf in profile["children"]:
-                    write_shape_page(leaf, shape_crumbs)
+                file_crumbs = profile_crumbs + [(profile["name"], profile["page"])]
+                for shacl_file in profile["children"]:
+                    file_href = dc.github_blob(
+                        shacl_file["repo"], shacl_file["shacl_subpath"]
+                    )
+                    write_scope_pages(
+                        shacl_file,
+                        file_crumbs,
+                        "Individual shape",
+                        f'SHACL file <a href="{esc(file_href)}" target="_blank" '
+                        f'rel="noopener">{esc(shacl_file["shacl_file"])}</a>. '
+                        "Each shape row repeats this file's validation time; "
+                        "the file total counts that run once.",
+                    )
+                    shape_crumbs = file_crumbs + [(shacl_file["name"], shacl_file["page"])]
+                    for leaf in shacl_file["children"]:
+                        write_shape_page(leaf, shape_crumbs)
     print(
         f"Cube: {len(cube['children'])} repositories, {len(runs)} runs, "
         f"{cube['t_count']} individual shapes, "
