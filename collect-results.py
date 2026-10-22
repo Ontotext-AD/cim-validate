@@ -37,11 +37,19 @@ SHACL_SOURCES = [
     for subpath in family.get("shacl_dirs") or []
 ]
 
-_DATA = dc.data_settings(CONFIG)
+_DATA_REPOS = {repo["id"]: repo for repo in dc.data_repositories_settings(CONFIG)}
+_DATA = dc.data_settings(CONFIG)  # first data repo; module constants stay backward-compatible
 GRAPHDB_RESOURCE = _DATA["graphdb_resource"]
 GRAPHDB_REPO = _DATA["graphdb_repository"]
 GRAPHDB_SPARQL = _DATA["graphdb_sparql"]
 GDB_LOOKUP_CHUNK = 100
+
+
+def data_repo_settings(data_repository_id: str = "") -> dict:
+    """Resolve GraphDB link/SPARQL settings for one data repository."""
+    if data_repository_id and data_repository_id in _DATA_REPOS:
+        return _DATA_REPOS[data_repository_id]
+    return _DATA
 
 # Prefixes used only to shorten URIs for display.
 DISPLAY_PREFIXES = {
@@ -147,13 +155,19 @@ def strip_literal(term: str | None) -> str:
     return term
 
 
-def graphdb_link(focus_term: str | None) -> tuple[str, str]:
-    """Return (display, href) for a focus node."""
+def graphdb_link(
+    focus_term: str | None,
+    data_repository_id: str = "",
+) -> tuple[str, str]:
+    """Return (display, href) for a focus node in the given data repository."""
     iri = strip_brackets(focus_term)
     if iri is None:
         return (shorten(focus_term), "")
-    href = (f"{GRAPHDB_RESOURCE}?uri={quote(iri, safe=':/')}"
-            f"&repositoryId={GRAPHDB_REPO}&role=all")
+    data = data_repo_settings(data_repository_id)
+    href = (
+        f"{data['graphdb_resource']}?uri={quote(iri, safe=':/')}"
+        f"&repositoryId={data['graphdb_repository']}&role=all"
+    )
     return (iri, href)
 
 
@@ -161,8 +175,14 @@ def _sparql_iri(iri: str) -> str:
     return "<" + iri.replace("\\", "\\\\").replace(">", "\\>") + ">"
 
 
-def iris_present_in_graphdb(iris: set[str], chunk: int = GDB_LOOKUP_CHUNK) -> set[str]:
-    """Return the subset of IRIs that appear in the configured data repository."""
+def iris_present_in_graphdb(
+    iris: set[str],
+    chunk: int = GDB_LOOKUP_CHUNK,
+    data_repository_id: str = "",
+    sparql: str = "",
+) -> set[str]:
+    """Return the subset of IRIs that appear in one data repository."""
+    endpoint = sparql or data_repo_settings(data_repository_id)["graphdb_sparql"]
     found: set[str] = set()
     ordered = [i for i in iris if i and not i.startswith("_:")]
     if not ordered:
@@ -183,7 +203,7 @@ def iris_present_in_graphdb(iris: set[str], chunk: int = GDB_LOOKUP_CHUNK) -> se
             "}"
         )
         req = Request(
-            GRAPHDB_SPARQL,
+            endpoint,
             data=urlencode({"query": query}).encode(),
             headers={
                 "Accept": "application/sparql-results+json",
@@ -217,7 +237,14 @@ def iris_present_in_graphdb(iris: set[str], chunk: int = GDB_LOOKUP_CHUNK) -> se
                     f"Splitting failed GraphDB batch {n}/{total} into chunks of {split_size}.",
                     file=sys.stderr,
                 )
-                found.update(iris_present_in_graphdb(set(batch), chunk=split_size))
+                found.update(
+                    iris_present_in_graphdb(
+                        set(batch),
+                        chunk=split_size,
+                        data_repository_id=data_repository_id,
+                        sparql=endpoint,
+                    )
+                )
             continue
         for binding in payload.get("results", {}).get("bindings", []):
             val = binding.get("iri", {}).get("value")

@@ -18,8 +18,8 @@ documentation.
 
 | Layer | Technology |
 |-------|------------|
-| Validation | GraphDB SHACL validation API (`data.graphdb_repository` on `validation_history.base_url`) |
-| Run storage | GraphDB named graph `validation_history.graph` in `validation_history.repository` |
+| Validation | GraphDB SHACL validation API (each `data_repositories[].graphdb_repository` on `validation_history.base_url`) |
+| Run storage | Same named graph IRI `validation_history.graph` inside **each** data repository |
 | Build language | Python 3.10+ (stdlib only, except the writer — see below) |
 | Writer dependencies | `rdflib` + `requests` (`requirements.txt`), used only by `write-validation-run-to-gdb.py` |
 | Batch orchestration | Bash (`validate-all-and-write-to-gdb.sh`) |
@@ -183,13 +183,18 @@ no `main()` and are never executed as a pipeline step.
 
 ```
 index.html
-  └── dashboard/r/<REPOSITORY>/index.html
+  └── dashboard/r/<DATA-REPOSITORY>/index.html
         └── f/<FAMILY>/index.html
               └── p/<ONTOLOGY-PROFILE>/index.html
                     └── sf/<SHACL-FILE>/index.html
                           └── s/<INDIVIDUAL-SHAPE>/index.html
 ```
 
+- The top **repository** dimension is a GraphDB *data* repository from
+  `data_repositories[]` (instance data under test), not a shapes-library
+  checkout. Each data repository stores validation reports under the same
+  named-graph IRI (`validation_history.graph`). Shapes-library checkouts stay
+  in `repositories[]` for cataloguing only.
 - Each non-zero aggregate measure links to the next level down with
   `#sort=<METRIC>`, which loads that page already ordered by the measure.
 - Ontology-profile frontmatter links the mapped RDFS artifact on GitHub.
@@ -198,8 +203,9 @@ index.html
 - Individual-shape frontmatter links the exact SHACL declaration line.
 - Shape error/warning counts link to focus-node evidence; distinct/good/total
   counts link to source grounding.
-- Landing, repository, and family frontmatter includes a **Validation execution
-  errors** tile linking to affected validation runs and their returned error text.
+- Landing, data-repository, and family frontmatter includes a **Validation
+  execution errors** tile linking to affected validation runs and their
+  returned error text.
 
 ### Metrics model (additive, reproducible)
 
@@ -230,7 +236,7 @@ and family frontmatter.
 During `build()`, `assign_focus_gdb_presence()` batch-queries GraphDB and sets
 `in_gdb` on each result item:
 
-- **GraphDB** — `sh:focusNode` column links to resource explorer (`…/resource?uri=…&repositoryId=<data.graphdb_repository>&role=all`) when the IRI is present in the repository; the cell is plain text otherwise.
+- **GraphDB** — `sh:focusNode` column links to resource explorer (`…/resource?uri=…&repositoryId=<data_repositories[].graphdb_repository>&role=all`) for the data repository that was validated; the cell is plain text otherwise.
 - **GitHub** — separate column: code search in `data.instance_github_repository` (UUID substring or full IRI) when a search query can be formed.
 
 Always use `role=all`, not `role=subject`. Presence check uses SPARQL batched in
@@ -272,13 +278,13 @@ export GDBPASS=<password>
 ./validate-all-and-write-to-gdb.sh
 ```
 
-One script, four stages: validate every configured SHACL file against
-`data.graphdb_repository`, append each response to
-`validation_history.repository` via `write-validation-run-to-gdb.py` (rdflib +
-requests), re-apply the retention window with `gdb_history.py`, then rebuild
-the dashboard with `build_dashboard_gdb.py`. No report or timing files are
-written to disk. GraphDB endpoints and repository names come from
-`dashboard-config.json`.
+One script, four stages: validate every configured SHACL file against every
+`data_repositories[].graphdb_repository`, append each response into that data
+repository's copy of `validation_history.graph` via
+`write-validation-run-to-gdb.py` (rdflib + requests), re-apply the retention
+window per data repository with `gdb_history.py`, then rebuild the dashboard
+with `build_dashboard_gdb.py`. No report or timing files are written to disk.
+GraphDB endpoints and repository names come from `dashboard-config.json`.
 
 The graph is never dropped, so each SHACL file gets one more
 `sh:ValidationReport` node per run, tagged `ex:file` / `ex:finishedAt` /
@@ -392,12 +398,14 @@ lockfile — the project is stdlib-Python plus hand-written CSS and JS.
 
 Edit `dashboard-config.json` for shape repositories, local checkouts, GitHub
 repository/ref, families, SHACL/RDFS/PROF directories, and optional
-SHACL-file-to-profile overrides. Families and repositories are extensible
-lists. GraphDB and instance GitHub settings live in the top-level `data`
-object; the history graph, published output paths, and retention window live
-in `validation_history`. Scripts read those objects through
-`dashboard_config.data_settings()` and `history_settings()` — do not hardcode
-GraphDB repository names or endpoints.
+SHACL-file-to-profile overrides. Families and shape repositories are extensible
+lists. GraphDB instance-data targets live in the top-level `data_repositories`
+array (each entry has its own `graphdb_repository` / SPARQL / instance GitHub);
+the shared history named-graph IRI, published output paths, and retention
+window live in `validation_history`. Scripts read those objects through
+`dashboard_config.data_repositories_settings()` and `history_settings()` — do
+not hardcode GraphDB repository names or endpoints. The legacy single `data`
+object is still accepted and migrated to one `data_repositories` entry.
 
 ### Source report limits
 

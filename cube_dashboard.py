@@ -69,7 +69,6 @@ def _load(name: str, filename: str):
 
 cr = _load("cube_collect_results", "collect-results.py")
 ct = _load("cube_collect_timings", "collect-timings.py")
-INSTANCE_REPO = dc.data_settings()["instance_github_repository"]
 
 
 def esc(value: object) -> str:
@@ -400,7 +399,8 @@ def result_item(result: dict, source: dict, index: dict) -> dict:
     severity = cr.shorten(result.get("sh:resultSeverity"))
     severity = severity.rsplit(":", 1)[-1].rsplit("#", 1)[-1] or "Info"
     focus_term = result.get("sh:focusNode")
-    focus_display, graphdb_href = cr.graphdb_link(focus_term)
+    data_repo_id = str(source.get("data_repository_id") or "")
+    focus_display, graphdb_href = cr.graphdb_link(focus_term, data_repo_id)
     constraint = result_iri(result, "sh:sourceConstraint")
     source_shape = result_iri(result, "sh:sourceShape")
     _display, source_href = cr.github_link(
@@ -411,11 +411,12 @@ def result_item(result: dict, source: dict, index: dict) -> dict:
     iri = result_iri(result, "sh:focusNode")
     found = UUID_RE.search(iri)
     query_value = found.group(0) if found else iri
+    instance_repo = str(source.get("instance_github_repository") or "")
     github_href = (
         "https://github.com/search?q="
-        + quote(f"repo:{INSTANCE_REPO} {query_value}")
+        + quote(f"repo:{instance_repo} {query_value}")
         + "&type=code"
-        if query_value and INSTANCE_REPO else ""
+        if query_value and instance_repo else ""
     )
     return {
         "severity": severity,
@@ -569,60 +570,75 @@ def _file_nodes(leaves: list[dict], profile_runs: dict[str, dict]) -> list[dict]
 
 
 def build_cube(catalog: dict, runs: list[dict]) -> dict:
+    """Build data-repository → family → profile → SHACL file → shape.
+
+    The top ``repository`` dimension is the GraphDB *data* repository that was
+    validated (``data_repositories[]``), not the shapes-library checkout.
+    """
+    # data_repo → family → profile → leaves
     by_repo: dict[str, dict[str, dict[str, list[dict]]]] = {}
     runs_by_profile: dict[tuple[str, str, str], dict[str, dict]] = {}
+    data_repo_meta: dict[str, dict] = {}
+    family_titles: dict[str, str] = {}
     for run in runs:
-        key = (run["repository_id"], run["family_id"], run["profile_id"])
+        data_repo_id = run["data_repository_id"]
+        data_repo_meta[data_repo_id] = {
+            "id": data_repo_id,
+            "title": run.get("data_repository_title") or data_repo_id,
+            "graphdb_repository": run.get("graphdb_repository") or "",
+            "instance_github_repository": run.get("instance_github_repository") or "",
+        }
+        family_titles[run["family_id"]] = run.get("family_title") or run["family_id"]
+        key = (data_repo_id, run["family_id"], run["profile_id"])
         runs_by_profile.setdefault(key, {})[run["id"]] = run
-        leaves = leaves_for_run(run)
-        by_repo.setdefault(run["repository_id"], {}).setdefault(
+        by_repo.setdefault(data_repo_id, {}).setdefault(
             run["family_id"], {}
-        ).setdefault(run["profile_id"], []).extend(leaves)
+        ).setdefault(run["profile_id"], []).extend(leaves_for_run(run))
 
+    shape_repos = {repo["id"]: repo for repo in catalog["repositories"]}
     repositories = []
-    repo_config = {repo["id"]: repo for repo in catalog["repositories"]}
-    for repository_id, families_data in by_repo.items():
+    for data_repo_id, families_data in by_repo.items():
         families = []
-        config_repo = repo_config[repository_id]
-        family_config = {family["id"]: family for family in config_repo["families_index"]}
         for family_id, profiles_data in families_data.items():
             profiles = []
-            source_profiles = {
-                source["profile_id"]: source
-                for source in family_config[family_id]["sources"]
-            }
             for profile_id, leaves in profiles_data.items():
-                source = source_profiles[profile_id]
-                profile_runs = runs_by_profile[(repository_id, family_id, profile_id)]
+                profile_runs = runs_by_profile[(data_repo_id, family_id, profile_id)]
+                sample = next(iter(profile_runs.values()))
+                shapes_repo = shape_repos.get(sample["repository_id"], sample.get("repo") or {})
                 files = _file_nodes(leaves, profile_runs)
                 profile = node(
                     profile_id,
-                    source["profile_name"],
+                    sample.get("profile_name") or profile_id,
                     files,
                     level="profile",
-                    ontology_file=source["ontology_file"],
-                    ontology_subpath=source["ontology_subpath"],
-                    repo=config_repo,
+                    ontology_file=sample.get("ontology_file") or "",
+                    ontology_subpath=sample.get("ontology_subpath") or "",
+                    repo=shapes_repo,
                 )
-                # Include a file run that declared no shapes in the profile timing.
                 profile.update(aggregate(files, profile_runs))
                 profiles.append(profile)
             family = node(
                 family_id,
-                family_config[family_id].get("title") or family_id,
+                family_titles.get(family_id) or family_id,
                 sorted(profiles, key=lambda item: item["name"].lower()),
                 level="family",
             )
             families.append(family)
+        meta = data_repo_meta[data_repo_id]
         repository = node(
-            repository_id,
-            config_repo.get("title") or repository_id,
+            data_repo_id,
+            meta["title"],
             sorted(families, key=lambda item: item["name"].lower()),
             level="repository",
-            repo=config_repo,
+            data_repo=meta,
         )
         repositories.append(repository)
-    return node("all", "All configured repositories", repositories, level="global")
+    return node(
+        "all",
+        "All data repositories",
+        sorted(repositories, key=lambda item: item["name"].lower()),
+        level="global",
+    )
 
 
 def assert_rollups(parent: dict, path: str = "all") -> None:
@@ -814,6 +830,7 @@ def write_execution_error_page(
             if run.get("meta", {}).get("execution_error")
         ),
         key=lambda run: (
+            str(run.get("data_repository_id") or ""),
             str(run.get("family_id") or ""),
             str(run.get("profile_name") or ""),
             str(run.get("shacl_file") or ""),
@@ -832,6 +849,7 @@ def write_execution_error_page(
         )
         rows.append(
             "<tr>"
+            f'<td>{esc(run.get("data_repository_title") or run.get("data_repository_id") or "")}</td>'
             f'<td>{esc(run.get("family_id") or "")}</td>'
             f'<td>{esc(run.get("profile_name") or "")}</td>'
             f"<td>{report}</td>"
@@ -844,7 +862,7 @@ def write_execution_error_page(
 <h1>{esc(scope["name"])} · {esc(METRIC_LABEL["execution_err"])}</h1>
 <p class="meta">{len(runs)} validation runs returned non-empty error text instead of a SHACL validation report.</p>
 <div class="table-wrap"><table>
-<thead><tr><th>Family</th><th>Ontology profile</th><th>SHACL file / response</th><th class="num">HTTP</th><th>Error</th></tr></thead>
+<thead><tr><th>Data repository</th><th>Family</th><th>Ontology profile</th><th>SHACL file / response</th><th class="num">HTTP</th><th>Error</th></tr></thead>
 <tbody>{"".join(rows)}</tbody>
 </table></div>
 """
@@ -1097,21 +1115,29 @@ def build(
 
     cube_json = write_cube_json(cube)
     root_meta = (
-        "Configured shape repositories. Timing sum/max use unique SHACL-file validation runs.<br>\n"
-        "Click any column header to reorder the table by that measure<br>\n"
+        "Configured GraphDB data repositories. Drill-down is "
+        "data repository → family → ontology profile → SHACL file → individual shape. "
+        "Timing sum/max use unique SHACL-file validation runs.<br>\n"
+        "Click any column header to reorder the table by that measure.<br>\n"
         f'Full cube data: <a href="{esc(rel(INDEX.parent, cube_json))}">cube.json</a>.'
     )
     if source_note:
         root_meta = f"{root_meta}<br>\n{source_note}"
-    write_scope_pages(cube, [], "Repository", root_meta)
+    write_scope_pages(cube, [], "Data repository", root_meta)
     for repo in cube["children"]:
-        repo_cfg = repo["repo"]
-        repo_link = dc.github_tree(repo_cfg)
-        repo_meta = (
-            f'<a href="{esc(repo_link)}" target="_blank" rel="noopener">'
-            f'{esc(repo_cfg["github_repository"])}</a> · aggregation by configured family.'
+        data_repo = repo.get("data_repo") or {}
+        gdb_name = data_repo.get("graphdb_repository") or repo["id"]
+        github = data_repo.get("instance_github_repository") or ""
+        github_html = (
+            f' · instance data <a href="https://github.com/{esc(github)}" '
+            f'target="_blank" rel="noopener">{esc(github)}</a>'
+            if github else ""
         )
-        repo_crumbs = [("All repositories", cube["page"])]
+        repo_meta = (
+            f'GraphDB repository <code>{esc(gdb_name)}</code>{github_html}. '
+            "Families group the configured SHACL sources validated against this repository."
+        )
+        repo_crumbs = [("All data repositories", cube["page"])]
         write_scope_pages(repo, repo_crumbs, "Family", repo_meta)
         for family in repo["children"]:
             family_crumbs = repo_crumbs + [(repo["name"], repo["page"])]
@@ -1153,7 +1179,7 @@ def build(
                     for leaf in shacl_file["children"]:
                         write_shape_page(leaf, shape_crumbs)
     print(
-        f"Cube: {len(cube['children'])} repositories, {len(runs)} runs, "
+        f"Cube: {len(cube['children'])} data repositories, {len(runs)} runs, "
         f"{cube['t_count']} individual shapes, "
         f"cube.json {cube_json.stat().st_size / 1048576:.1f} MiB"
     )

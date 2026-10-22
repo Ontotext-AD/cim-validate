@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # The whole pipeline, end to end:
 #
-#   1. validate every configured SHACL file against the instance-data
-#      repository in dashboard-config.json, one POST per file;
-#   2. parse each response and append it to the GraphDB validation-history
-#      graph (write-validation-run-to-gdb.py) -- no report or timing files are
-#      written to disk;
-#   3. re-apply the retention window over the whole graph (gdb_history.py);
-#   4. rebuild the dashboard from that graph (build_dashboard_gdb.py).
+#   1. validate every configured SHACL file against EACH instance-data
+#      repository in dashboard-config.json (data_repositories[]), one POST per
+#      file per data repository;
+#   2. parse each response and append it to THAT data repository under the
+#      shared named-graph IRI (write-validation-run-to-gdb.py) -- no report or
+#      timing files are written to disk;
+#   3. re-apply the retention window to EACH data repository (gdb_history.py);
+#   4. rebuild the dashboard from all data repositories (build_dashboard_gdb.py).
 #
-# GraphDB URLs, repositories, the history named graph, and the SHACL file
-# list all come from dashboard-config.json. GDB_BASE_URL,
-# GDB_HISTORY_REPOSITORY, and GDB_HISTORY_GRAPH still override the matching
-# JSON fields.
+# GraphDB URLs, data repositories, the history named graph, and the SHACL file
+# list all come from dashboard-config.json. GDB_BASE_URL and
+# GDB_HISTORY_GRAPH still override the matching JSON fields.
 #
 # Re-running does not overwrite previous runs, but history is bounded: each
 # SHACL file keeps its last two timings and the validation results of the very
@@ -22,14 +22,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 eval "$(python3 "$SCRIPT_DIR/dashboard_config.py" --export-shell)"
-: "${GDB_URL:?}" "${VALIDATE_REPO:?}" "${HISTORY_REPO:?}" "${HISTORY_GRAPH:?}"
+: "${GDB_URL:?}" "${HISTORY_GRAPH:?}" "${DATA_REPO_IDS:?}" "${DATA_REPO_GRAPHDB_NAMES:?}"
 
 echo "GraphDB: $GDB_URL"
-echo "Validate repository: $VALIDATE_REPO"
-echo "History repository: $HISTORY_REPO"
 echo "History graph: $HISTORY_GRAPH"
-
-VALIDATE_ENDPOINT="${GDB_URL}rest/repositories/${VALIDATE_REPO}/validate/file"
+echo "Data repositories: $DATA_REPO_IDS"
 
 LOG="$SCRIPT_DIR/batch-gdb.log"
 : > "$LOG"
@@ -64,18 +61,34 @@ token=${auth_header#*: }
 token=${token#"${token%%[![:space:]]*}"}
 AUTH_HEADER="Authorization: $token"
 
-done_count=0
-fail_count=0
+IFS=' ' read -r -a repo_ids <<< "$DATA_REPO_IDS"
+IFS=' ' read -r -a repo_names <<< "$DATA_REPO_GRAPHDB_NAMES"
 
-while IFS= read -r file; do
+total_done_count=0
+total_fail_count=0
+
+for idx in "${!repo_ids[@]}"; do
+  data_repo_id="${repo_ids[$idx]}"
+  data_repo_name="${repo_names[$idx]}"
+
+  echo "" | tee -a "$LOG"
+  echo "======================================================================" | tee -a "$LOG"
+  echo "[$(date -Iseconds)] VALIDATING DATA REPOSITORY: $data_repo_id ($data_repo_name)" | tee -a "$LOG"
+  echo "======================================================================" | tee -a "$LOG"
+
+  VALIDATE_ENDPOINT="${GDB_URL}rest/repositories/${data_repo_name}/validate/file"
+  done_count=0
+  fail_count=0
+
+  while IFS= read -r file; do
     [[ -n "$file" ]] || continue
     base=$(basename "$file")
     [[ "$base" == "validation-report.ttl" || "$base" == "relicap-val-report.ttl" ]] && continue
 
     name="${base%.ttl}"
-    tmp_report="$tmp_dir/$name.ttl"
+    tmp_report="$tmp_dir/$name-$data_repo_id.ttl"
 
-    echo "[$(date -Iseconds)] START $name" | tee -a "$LOG"
+    echo "[$(date -Iseconds)] [$data_repo_id] START $name" | tee -a "$LOG"
     start=$(python3 -c 'import time; print(time.perf_counter())')
     http_code=$(curl -s -X POST --header 'Accept: text/turtle' -H "$AUTH_HEADER" \
       "$VALIDATE_ENDPOINT" \
@@ -90,12 +103,13 @@ while IFS= read -r file; do
     py_out=$(python3 "$SCRIPT_DIR/write-validation-run-to-gdb.py" \
       --shacl-file "$file" \
       --report "$tmp_report" \
-      --repository-validated "$VALIDATE_REPO" \
+      --data-repository-id "$data_repo_id" \
+      --repository-validated "$data_repo_name" \
+      --graphdb-repository "$data_repo_name" \
       --http-status "$http_code" \
       --duration-seconds "$duration" \
       --finished-at "$finished_at" \
       --gdb-url "$GDB_URL" \
-      --repository "$HISTORY_REPO" \
       --graph "$HISTORY_GRAPH" \
       --auth-header "$AUTH_HEADER" 2>&1)
     py_status=$?
@@ -104,24 +118,26 @@ while IFS= read -r file; do
     rm -f "$tmp_report"
 
     if [[ "$http_code" == "200" && $py_status -eq 0 ]]; then
-      echo "[$(date -Iseconds)] DONE $name (${duration}s) -> $HISTORY_REPO" | tee -a "$LOG"
+      echo "[$(date -Iseconds)] [$data_repo_id] DONE $name (${duration}s) -> $data_repo_name" | tee -a "$LOG"
       ((done_count++)) || true
     else
-      echo "[$(date -Iseconds)] FAIL $name (HTTP $http_code, ${duration}s)" | tee -a "$LOG"
+      echo "[$(date -Iseconds)] [$data_repo_id] FAIL $name (HTTP $http_code, ${duration}s)" | tee -a "$LOG"
       ((fail_count++)) || true
     fi
-done < <(python3 "$SCRIPT_DIR/dashboard_config.py" --list-shacl)
+  done < <(python3 "$SCRIPT_DIR/dashboard_config.py" --list-shacl)
 
-echo "[$(date -Iseconds)] BATCH COMPLETE: $done_count succeeded, $fail_count failed" | tee -a "$LOG"
-echo "[$(date -Iseconds)] History written to repository '$HISTORY_REPO', named graph <$HISTORY_GRAPH>" | tee -a "$LOG"
+  echo "[$(date -Iseconds)] [$data_repo_id] COMPLETE: $done_count succeeded, $fail_count failed" | tee -a "$LOG"
+  total_done_count=$((total_done_count + done_count))
+  total_fail_count=$((total_fail_count + fail_count))
 
-# Retention is applied per file as each run is written, but a batch that was
-# interrupted can leave files that were never revisited outside the window.
-# Re-applying it over the whole graph is idempotent and takes seconds.
-echo "[$(date -Iseconds)] Applying retention window to the whole graph" | tee -a "$LOG"
-python3 "$SCRIPT_DIR/gdb_history.py" --auth-header "$AUTH_HEADER" 2>>"$LOG" | tee -a "$LOG"
+  echo "[$(date -Iseconds)] Applying retention window to $data_repo_name" | tee -a "$LOG"
+  python3 "$SCRIPT_DIR/gdb_history.py" \
+    --graphdb-repository "$data_repo_name" \
+    --auth-header "$AUTH_HEADER" 2>>"$LOG" | tee -a "$LOG"
+done
 
-# The dashboard is rebuilt from the graph, never from files, so this is the
-# only generation step: it rewrites index.html and dashboard/ in place.
+echo "[$(date -Iseconds)] BATCH COMPLETE: $total_done_count succeeded, $total_fail_count failed" | tee -a "$LOG"
+echo "[$(date -Iseconds)] History written under named graph <$HISTORY_GRAPH> in each data repository" | tee -a "$LOG"
+
 echo "[$(date -Iseconds)] GENERATING DASHBOARD FROM GRAPHDB" | tee -a "$LOG"
 python3 "$SCRIPT_DIR/build_dashboard_gdb.py" 2>>"$LOG" | tee -a "$LOG"

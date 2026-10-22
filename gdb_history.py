@@ -272,10 +272,54 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--keep-results", type=int, default=0,
                         help="Runs that keep their sh:result nodes (default: validation_history.keep_results)")
     parser.add_argument("--file", default="", help="Prune only this SHACL filename")
+    parser.add_argument(
+        "--graphdb-repository",
+        default="",
+        help="GraphDB data repository to prune (default: every data_repositories[] entry)",
+    )
     parser.add_argument("--auth-header", default="", help='Full header, e.g. "Authorization: Bearer xyz"')
     parser.add_argument("--dry-run", action="store_true",
                         help="Report current graph size and the window, change nothing")
     return parser.parse_args()
+
+
+def _histories_to_prune(config: dict, args: argparse.Namespace) -> list[dict]:
+    import dashboard_config as dc
+
+    history_settings = dc.history_settings(config)
+    data_repos = dc.data_repositories_settings(config)
+    if args.graphdb_repository:
+        targets = [
+            repo for repo in data_repos
+            if repo["graphdb_repository"] == args.graphdb_repository
+        ]
+        if not targets:
+            targets = [{
+                "id": args.graphdb_repository,
+                "graphdb_repository": args.graphdb_repository,
+                "graphdb_sparql": (
+                    f"{history_settings['base_url'].rstrip('/')}"
+                    f"/repositories/{args.graphdb_repository}"
+                ),
+            }]
+    else:
+        targets = data_repos
+        if not targets and history_settings.get("repository"):
+            targets = [{
+                "id": history_settings["repository"],
+                "graphdb_repository": history_settings["repository"],
+                "graphdb_sparql": history_settings["sparql"],
+            }]
+    histories = []
+    for repo in targets:
+        histories.append({
+            "base_url": history_settings["base_url"],
+            "repository": repo["graphdb_repository"],
+            "graph": history_settings["graph"],
+            "sparql": repo.get("graphdb_sparql")
+            or f"{history_settings['base_url'].rstrip('/')}/repositories/{repo['graphdb_repository']}",
+        })
+    return histories
 
 
 def main() -> int:
@@ -283,36 +327,41 @@ def main() -> int:
 
     args = parse_args()
     config = dc.load_config()
-    history = gs.history_config(config)
     keep_timings, keep_results = retention(config)
     keep_timings = args.keep_timings or keep_timings
     keep_results = args.keep_results or keep_results
+    histories = _histories_to_prune(config, args)
+    if not histories:
+        raise SystemExit("ERROR: No GraphDB repository to prune")
 
-    print(f"Repository : {history['repository']}")
-    print(f"Named graph: {history['graph']}")
-    print(f"Window     : {keep_timings} timing(s) per file, results on the newest {keep_results}")
-    before = graph_stats(history)
-    print(
-        f"Before     : {before['reports']} reports, {before['results']} results, "
-        f"{before['triples']} triples"
-    )
-    if args.dry_run:
-        print("Dry run: nothing changed.")
-        return 0
+    total_count = 0
+    for history in histories:
+        print(f"Repository : {history['repository']}")
+        print(f"Named graph: {history['graph']}")
+        print(f"Window     : {keep_timings} timing(s) per file, results on the newest {keep_results}")
+        before = graph_stats(history)
+        print(
+            f"Before     : {before['reports']} reports, {before['results']} results, "
+            f"{before['triples']} triples"
+        )
+        if args.dry_run:
+            print("Dry run: nothing changed.")
+            continue
 
-    count = prune_all(history, keep_timings, keep_results, args.auth_header, args.file)
-    after = graph_stats(history)
-    print(
-        f"After      : {after['reports']} reports, {after['results']} results, "
-        f"{after['triples']} triples"
-    )
-    print(
-        f"Pruned {count} SHACL file(s): "
-        f"-{before['reports'] - after['reports']} reports, "
-        f"-{before['results'] - after['results']} results, "
-        f"-{before['triples'] - after['triples']} triples"
-    )
-    return 0
+        count = prune_all(history, keep_timings, keep_results, args.auth_header, args.file)
+        after = graph_stats(history)
+        print(
+            f"After      : {after['reports']} reports, {after['results']} results, "
+            f"{after['triples']} triples"
+        )
+        print(
+            f"Pruned {count} SHACL file(s): "
+            f"-{before['reports'] - after['reports']} reports, "
+            f"-{before['results'] - after['results']} results, "
+            f"-{before['triples'] - after['triples']} triples"
+        )
+        total_count += count
+    return 0 if total_count or args.dry_run else 0
 
 
 if __name__ == "__main__":

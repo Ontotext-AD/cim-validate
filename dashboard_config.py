@@ -75,12 +75,39 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
                     f"Family id is missing or duplicated in {repo_id}: {family_id!r}"
                 )
             seen_families.add(family_id)
-    _section(raw, "data")
+    # Prefer data_repositories[]; migrate legacy single ``data`` object.
+    if "data" in raw and "data_repositories" not in raw:
+        print(
+            "Warning: 'data' object is deprecated. Use 'data_repositories' array instead.",
+            file=sys.stderr,
+        )
+        raw["data_repositories"] = [
+            {"id": "default", "title": "Instance Data", **raw["data"]}
+        ]
+    data_repositories = raw.get("data_repositories")
+    if not isinstance(data_repositories, list) or not data_repositories:
+        raise ValueError(
+            "dashboard-config.json must contain a non-empty data_repositories list"
+        )
+    seen_data: set[str] = set()
+    for data_repo in data_repositories:
+        data_repo_id = str(data_repo.get("id") or "")
+        if not data_repo_id or data_repo_id in seen_data:
+            raise ValueError(
+                f"Data repository id is missing or duplicated: {data_repo_id!r}"
+            )
+        seen_data.add(data_repo_id)
+        _field(
+            data_repo,
+            "graphdb_repository",
+            f"data_repositories[{data_repo_id}].graphdb_repository",
+        )
+
     _section(raw, "validation_history")
-    _field(raw["data"], "graphdb_repository", "data.graphdb_repository")
     _field(raw["validation_history"], "base_url", "validation_history.base_url")
-    _field(raw["validation_history"], "repository", "validation_history.repository")
     _field(raw["validation_history"], "graph", "validation_history.graph")
+    # validation_history.repository is optional: reports live in each data
+    # repository under the shared named-graph IRI.
     return raw
 
 
@@ -126,66 +153,97 @@ def _field(section: dict, key: str, path: str) -> str:
 
 
 def history_settings(config: dict | None = None) -> dict:
-    """History GraphDB target from dashboard-config.json.
+    """Shared validation-history settings from dashboard-config.json.
 
-    ``GDB_BASE_URL``, ``GDB_HISTORY_REPOSITORY``, and ``GDB_HISTORY_GRAPH``
-    override the matching JSON fields so the batch script and Python readers
-    stay pointed at the same place. There is no hardcoded repository name.
+    ``GDB_BASE_URL`` and ``GDB_HISTORY_GRAPH`` override the matching JSON
+    fields. Each data repository stores reports under the same named-graph
+    IRI; ``validation_history.repository`` is optional (legacy single-repo).
     """
     config = config if config is not None else load_config()
     raw = _section(config, "validation_history")
     base_url = os.environ.get("GDB_BASE_URL") or _field(
         raw, "base_url", "validation_history.base_url"
     )
-    repository = os.environ.get("GDB_HISTORY_REPOSITORY") or _field(
-        raw, "repository", "validation_history.repository"
-    )
     graph = os.environ.get("GDB_HISTORY_GRAPH") or _field(
         raw, "graph", "validation_history.graph"
     )
     if not str(base_url).endswith("/"):
         base_url = f"{base_url}/"
-    return {
+    repository = (
+        os.environ.get("GDB_HISTORY_REPOSITORY")
+        or str(raw.get("repository") or "").strip()
+    )
+    result = {
         "base_url": base_url,
-        "repository": repository,
         "graph": graph,
-        "sparql": str(raw.get("sparql") or "").strip()
-        or f"{base_url.rstrip('/')}/repositories/{repository}",
         "index": str(raw.get("index") or "").strip() or "index.html",
         "dashboard_dir": str(raw.get("dashboard_dir") or "").strip() or "dashboard",
         "keep_timings": int(raw.get("keep_timings") or 2),
         "keep_results": int(raw.get("keep_results") or 1),
     }
+    if repository:
+        result["repository"] = repository
+        result["sparql"] = str(raw.get("sparql") or "").strip() or (
+            f"{base_url.rstrip('/')}/repositories/{repository}"
+        )
+    return result
+
+
+def data_repositories_settings(config: dict | None = None) -> list[dict]:
+    """Instance-data GraphDB targets from ``data_repositories``."""
+    config = config if config is not None else load_config()
+    data_repositories = config.get("data_repositories")
+    if not isinstance(data_repositories, list):
+        raise ValueError("dashboard-config.json must contain a data_repositories list")
+    base = history_settings(config)["base_url"].rstrip("/")
+    result = []
+    for raw in data_repositories:
+        repo_id = str(raw.get("id") or "")
+        repository = _field(
+            raw, "graphdb_repository", f"data_repositories[{repo_id}].graphdb_repository"
+        )
+        result.append({
+            "id": repo_id,
+            "title": str(raw.get("title") or "").strip() or repo_id,
+            "graphdb_repository": repository,
+            "graphdb_resource": str(raw.get("graphdb_resource") or "").strip()
+            or f"{base}/resource",
+            "graphdb_sparql": str(raw.get("graphdb_sparql") or "").strip()
+            or f"{base}/repositories/{repository}",
+            "instance_github_repository": str(
+                raw.get("instance_github_repository") or ""
+            ).strip(),
+            "instance_github_ref": str(raw.get("instance_github_ref") or "").strip(),
+        })
+    return result
 
 
 def data_settings(config: dict | None = None) -> dict:
-    """Instance-data GraphDB settings from dashboard-config.json ``data``."""
-    config = config if config is not None else load_config()
-    raw = _section(config, "data")
-    repository = _field(raw, "graphdb_repository", "data.graphdb_repository")
-    base = history_settings(config)["base_url"].rstrip("/")
-    return {
-        "graphdb_repository": repository,
-        "graphdb_resource": str(raw.get("graphdb_resource") or "").strip()
-        or f"{base}/resource",
-        "graphdb_sparql": str(raw.get("graphdb_sparql") or "").strip()
-        or f"{base}/repositories/{repository}",
-        "instance_github_repository": str(
-            raw.get("instance_github_repository") or ""
-        ).strip(),
-    }
+    """First data repository settings (backward-compatible single-repo helper)."""
+    repos = data_repositories_settings(config)
+    if not repos:
+        raise ValueError("No data repositories configured")
+    return repos[0]
 
 
 def export_shell(config: dict | None = None) -> None:
     """Print ``KEY=value`` lines for ``eval`` in the batch script."""
     history = history_settings(config)
-    data = data_settings(config)
+    data_repos = data_repositories_settings(config)
     values = {
         "GDB_URL": history["base_url"],
-        "VALIDATE_REPO": data["graphdb_repository"],
-        "HISTORY_REPO": history["repository"],
         "HISTORY_GRAPH": history["graph"],
+        "DATA_REPO_IDS": " ".join(shlex.quote(repo["id"]) for repo in data_repos),
+        "DATA_REPO_TITLES": " ".join(shlex.quote(repo["title"]) for repo in data_repos),
+        "DATA_REPO_GRAPHDB_NAMES": " ".join(
+            shlex.quote(repo["graphdb_repository"]) for repo in data_repos
+        ),
     }
+    # Backward-compatible single-repo exports used by older helpers.
+    if data_repos:
+        values["VALIDATE_REPO"] = data_repos[0]["graphdb_repository"]
+    if history.get("repository"):
+        values["HISTORY_REPO"] = history["repository"]
     for key, value in values.items():
         print(f"{key}={shlex.quote(value)}")
 

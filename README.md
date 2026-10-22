@@ -26,8 +26,8 @@ export GDBPASS=<password>
 That single script does everything:
 
 1. **Validate** — POST every SHACL file listed in `dashboard-config.json` to
-   the GraphDB validation endpoint for `data.graphdb_repository`, one request
-   per file.
+   each GraphDB data repository in `data_repositories[]`, one request per
+   file per data repository.
 2. **Record** — parse each response with `write-validation-run-to-gdb.py` and
    append it to the validation-history named graph. No `validation-report.ttl`
    or `timing.txt` is ever written to disk.
@@ -41,7 +41,7 @@ flowchart TB
   subgraph inputs["Inputs"]
     APL["entsoe/CGMES-AP · entsoe/NC-AP<br/>CGMES/SHACL · NCP/SHACL"]
     CFG["dashboard-config.json"]
-    DATA["GraphDB instance data<br/>data.graphdb_repository"]
+    DATA["GraphDB data repositories<br/>data_repositories[]"]
   end
 
   subgraph pipeline["validate-all-and-write-to-gdb.sh"]
@@ -127,15 +127,14 @@ relicap-ap-shacl-eval/
 `build_dashboard_gdb.py` writes a static cube:
 
 ```
-all repositories → repository → family → ontology profile → SHACL file → individual SHACL shape
+all data repositories → data repository → family → ontology profile → SHACL file → individual SHACL shape
 ```
 
-- `index.html` contains one aggregation row per configured shapes repository.
-- `dashboard/r/<repository>/index.html` aggregates its configured families.
-- `dashboard/r/<repository>/f/<family>/index.html` aggregates ontology profiles.
-- `dashboard/r/<repository>/f/<family>/p/<profile>/index.html` aggregates the
-  profile's SHACL files. The frontmatter links to the profile's RDFS ontology
-  on GitHub.
+- `index.html` contains one aggregation row per configured GraphDB data repository.
+- `dashboard/r/<data-repository>/index.html` aggregates configured families.
+- `dashboard/r/<data-repository>/f/<family>/index.html` aggregates ontology profiles.
+- `.../p/<profile>/index.html` aggregates the profile's SHACL files. The
+  frontmatter links to the profile's RDFS ontology on GitHub.
 - `.../sf/<file>/index.html` lists that file's individual shapes, with the same
   measures and column sorting as the levels above. The frontmatter links to
   the SHACL file on GitHub. Each shape row repeats the file's validation time;
@@ -144,13 +143,13 @@ all repositories → repository → family → ontology profile → SHACL file �
   SHACL declaration line; error and warning counts open focus-node evidence.
 
 Every level uses timing sum/max, errors, warnings, distinct errors, distinct
-warnings, good shapes, and total shapes. Landing, repository, and family
+warnings, good shapes, and total shapes. Landing, data-repository, and family
 frontmatter also shows **Validation execution errors**: runs that produced no
-SHACL `sh:ValidationReport`, plus configured SHACL files with no run in the
-graph at all. The tile links to the affected SHACL files, HTTP statuses,
-and returned error text. Validation measures are additive, and the build checks
-every rollup. A shape is classified in exactly one bucket (error takes precedence
-over warning), so:
+SHACL `sh:ValidationReport`, plus configured SHACL files with no run in that
+data repository's graph. The tile links to the affected SHACL files, HTTP
+statuses, and returned error text. Validation measures are additive, and the
+build checks every rollup. A shape is classified in exactly one bucket (error
+takes precedence over warning), so:
 
 ```
 distinct errors + distinct warnings + good shapes = total shapes

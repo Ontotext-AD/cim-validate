@@ -4,9 +4,10 @@ more timestamped *run* -- into a GraphDB repository/named graph that
 accumulates validation history over time.
 
 Companion to ``validate-all-and-write-to-gdb.sh``. For every SHACL file that
-script POSTs to the instance-data validate endpoint (``data.graphdb_repository``
-in ``dashboard-config.json``), it invokes this script once with the raw Turtle
-response plus timing metadata. This script:
+script POSTs to each instance-data validate endpoint
+(``data_repositories[].graphdb_repository`` in ``dashboard-config.json``), it
+invokes this script once with the raw Turtle response plus timing metadata.
+This script:
 
   1. Parses the returned ``validation-report.ttl`` with rdflib.
   2. Flattens it one level deep (report -> ``sh:result`` blank nodes -> their
@@ -14,10 +15,10 @@ response plus timing metadata. This script:
      ``sh:resultSeverity``, ``sh:value``, ``sh:resultMessage``), the same
      shape sketched by ``validation-result-model.ttl``.
   3. Tags the report's (blank-node) subject with this run's provenance:
-     ``ex:file``, ``ex:repositoryValidated``, ``ex:httpStatus``,
-     ``ex:durationSeconds``, ``ex:finishedAt``.
-  4. POSTs the resulting triples into GraphDB with the configured named graph
-     as context.
+     ``ex:file``, ``ex:dataRepositoryId``, ``ex:repositoryValidated``,
+     ``ex:httpStatus``, ``ex:durationSeconds``, ``ex:finishedAt``.
+  4. POSTs the resulting triples into **that** data repository under the
+     shared named-graph IRI (``validation_history.graph``).
 
 The graph is never dropped: each invocation *appends* one more
 ``sh:ValidationReport`` blank node ("run") with its own ``ex:finishedAt`` /
@@ -53,7 +54,7 @@ Standalone usage:
         --finished-at 2026-09-29T10:00:00+03:00 \\
         --auth-header "Authorization: Bearer ..."
 
-Destination ``--gdb-url``, ``--repository``, ``--graph``, and
+Destination ``--gdb-url``, ``--graph``, ``--graphdb-repository``, and
 ``--repository-validated`` default to ``dashboard-config.json``.
 """
 from __future__ import annotations
@@ -110,9 +111,19 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--shacl-file", required=True, help="Path to the validated .ttl shapes file")
     p.add_argument("--report", required=True, help="Path to the raw validation response (Turtle or error text)")
     p.add_argument(
+        "--data-repository-id",
+        default=data.get("id") or "default",
+        help="Data repository id from data_repositories[].id",
+    )
+    p.add_argument(
         "--repository-validated",
         default=data["graphdb_repository"],
-        help="GraphDB repository that was validated against (default: data.graphdb_repository)",
+        help="GraphDB repository that was validated against",
+    )
+    p.add_argument(
+        "--graphdb-repository",
+        default="",
+        help="GraphDB repository to write the report into (default: --repository-validated)",
     )
     p.add_argument("--http-status", required=True)
     p.add_argument("--duration-seconds", required=True)
@@ -124,8 +135,8 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--repository",
-        default=history["repository"],
-        help="History repository (default: validation_history.repository)",
+        default=history.get("repository") or "",
+        help="DEPRECATED: use --graphdb-repository",
     )
     p.add_argument(
         "--graph",
@@ -167,6 +178,7 @@ def append_run_metadata(original_graph: Graph, cleaned_graph: Graph, meta: dict[
     if report_subject is None:
         return cleaned_graph
     cleaned_graph.add((report_subject, EX.file, Literal(meta["file"])))
+    cleaned_graph.add((report_subject, EX.dataRepositoryId, Literal(meta["data_repository_id"])))
     cleaned_graph.add((report_subject, EX.repositoryValidated, Literal(meta["repository_validated"])))
     cleaned_graph.add((report_subject, EX.httpStatus, Literal(meta["http_status"], datatype=XSD.integer)))
     cleaned_graph.add((report_subject, EX.durationSeconds, Literal(meta["duration_seconds"], datatype=XSD.decimal)))
@@ -203,6 +215,7 @@ def build_error_run(meta: dict[str, str], error_text: str) -> Graph:
     graph.add((run, EX.executionError, Literal(True)))
     graph.add((run, EX.errorText, Literal(error_text)))
     graph.add((run, EX.file, Literal(meta["file"])))
+    graph.add((run, EX.dataRepositoryId, Literal(meta["data_repository_id"])))
     graph.add((run, EX.repositoryValidated, Literal(meta["repository_validated"])))
     graph.add((run, EX.httpStatus, Literal(meta["http_status"], datatype=XSD.integer)))
     graph.add((run, EX.durationSeconds, Literal(meta["duration_seconds"], datatype=XSD.decimal)))
@@ -210,9 +223,16 @@ def build_error_run(meta: dict[str, str], error_text: str) -> Graph:
     return graph
 
 
+def target_repository(args: argparse.Namespace) -> str:
+    repo = args.graphdb_repository or args.repository_validated or args.repository
+    if not repo:
+        raise SystemExit("ERROR: Must provide --graphdb-repository or --repository-validated")
+    return repo
+
+
 def post_graph(graph: Graph, args: argparse.Namespace) -> None:
     triples_data = graph.serialize(format="ntriples")
-    endpoint = args.gdb_url.rstrip("/") + f"/repositories/{args.repository}/statements"
+    endpoint = args.gdb_url.rstrip("/") + f"/repositories/{target_repository(args)}/statements"
     headers = {"Content-Type": "application/n-triples"}
     if args.auth_header:
         name, _, value = args.auth_header.partition(":")
@@ -240,13 +260,14 @@ def prune_history(args: argparse.Namespace, shacl_file: str) -> None:
         return
     import gdb_history as gh
 
+    target = target_repository(args)
     history = dict(
         dc.history_settings(),
         base_url=args.gdb_url,
-        repository=args.repository,
+        repository=target,
         graph=args.graph,
     )
-    history["sparql"] = f"{args.gdb_url.rstrip('/')}/repositories/{args.repository}"
+    history["sparql"] = f"{args.gdb_url.rstrip('/')}/repositories/{target}"
     keep_timings, keep_results = gh.retention(dc.load_config())
     try:
         gh.prune_file(
@@ -262,8 +283,11 @@ def prune_history(args: argparse.Namespace, shacl_file: str) -> None:
 
 def main() -> int:
     args = parse_args()
+    if not args.graphdb_repository:
+        args.graphdb_repository = args.repository_validated or args.repository
     meta = {
         "file": Path(args.shacl_file).name,
+        "data_repository_id": args.data_repository_id,
         "repository_validated": args.repository_validated,
         "http_status": str(args.http_status),
         "duration_seconds": str(args.duration_seconds),

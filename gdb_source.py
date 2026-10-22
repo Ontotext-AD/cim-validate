@@ -57,12 +57,13 @@ RUNS_QUERY = """
 PREFIX sh: <http://www.w3.org/ns/shacl#>
 PREFIX ex: <http://example.org/ns#>
 PREFIX rdf4j: <http://rdf4j.org/schema/rdf4j#>
-SELECT ?file ?finishedAt ?duration ?status ?validated ?conforms ?truncated
-       ?executionError ?errorText
+SELECT ?file ?dataRepositoryId ?finishedAt ?duration ?status ?validated ?conforms
+       ?truncated ?executionError ?errorText
 WHERE {
   GRAPH %(graph)s {
     ?report a sh:ValidationReport .
     %(meta)s
+    OPTIONAL { ?meta ex:dataRepositoryId ?dataRepositoryId }
     OPTIONAL { ?meta ex:finishedAt ?finishedAt }
     OPTIONAL { ?meta ex:durationSeconds ?duration }
     OPTIONAL { ?meta ex:httpStatus ?status }
@@ -245,7 +246,11 @@ def run_href(history: dict, shacl_file: str) -> str:
     )
 
 
-def fetch_runs(history: dict, as_of: str | None = None) -> dict[str, list[dict]]:
+def fetch_runs(
+    history: dict,
+    as_of: str | None = None,
+    data_repo_id: str = "",
+) -> dict[str, list[dict]]:
     """Return every recorded run, grouped by SHACL filename, newest first."""
     query = RUNS_QUERY % {"graph": f"<{history['graph']}>", "meta": META_PATTERN}
     by_file: dict[str, list[dict]] = {}
@@ -260,6 +265,7 @@ def fetch_runs(history: dict, as_of: str | None = None) -> dict[str, list[dict]]
         by_file.setdefault(shacl_file, []).append(
             {
                 "shacl_file": shacl_file,
+                "data_repository_id": _text(row.get("dataRepositoryId")) or data_repo_id,
                 "finished_at": finished_at,
                 "duration": _number(row.get("duration")),
                 "http_status": _text(row.get("status")),
@@ -349,7 +355,11 @@ def count_unresolved(history: dict) -> int:
 
 
 def load_runs(history: dict, as_of: str | None = None) -> dict:
-    """Load the history graph and select the latest run per SHACL file."""
+    """Load one history graph and select the latest run per SHACL file.
+
+    Prefer :func:`load_runs_multi_repo` when more than one data repository is
+    configured.
+    """
     by_file = fetch_runs(history, as_of)
     selected = {shacl_file: runs[0] for shacl_file, runs in by_file.items()}
     fetch_results(history, list(selected.values()))
@@ -360,6 +370,46 @@ def load_runs(history: dict, as_of: str | None = None) -> dict:
         "selected": selected,
         "run_total": sum(len(runs) for runs in by_file.values()),
         "unresolved": count_unresolved(history),
+    }
+
+
+def load_runs_multi_repo(
+    data_repositories: list[dict],
+    history_settings: dict,
+    as_of: str | None = None,
+) -> dict:
+    """Load validation runs from every data repository's shared named graph."""
+    by_data_repo: dict[str, dict[str, list[dict]]] = {}
+    selected: dict[tuple[str, str], dict] = {}
+    run_total = 0
+    unresolved_total = 0
+
+    for data_repo in data_repositories:
+        data_repo_id = data_repo["id"]
+        print(f"Loading runs from data repository: {data_repo_id}", file=sys.stderr)
+        history = {
+            "base_url": history_settings["base_url"],
+            "repository": data_repo["graphdb_repository"],
+            "graph": history_settings["graph"],
+            "sparql": data_repo["graphdb_sparql"],
+        }
+        by_file = fetch_runs(history, as_of, data_repo_id)
+        by_data_repo[data_repo_id] = by_file
+        data_repo_selected = {shacl_file: runs[0] for shacl_file, runs in by_file.items()}
+        fetch_results(history, list(data_repo_selected.values()))
+        for shacl_file, run in data_repo_selected.items():
+            selected[(data_repo_id, shacl_file)] = run
+        run_total += sum(len(runs) for runs in by_file.values())
+        unresolved_total += count_unresolved(history)
+
+    return {
+        "data_repositories": data_repositories,
+        "history_settings": history_settings,
+        "as_of": as_of or "",
+        "by_data_repo": by_data_repo,
+        "selected": selected,
+        "run_total": run_total,
+        "unresolved_total": unresolved_total,
     }
 
 
@@ -377,24 +427,26 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    history = history_config()
-    snapshot = load_runs(history, args.as_of or None)
-    print(f"Repository : {history['repository']}")
-    print(f"Named graph: {history['graph']}")
+    config = dc.load_config()
+    history_settings = dc.history_settings(config)
+    data_repos = dc.data_repositories_settings(config)
+    snapshot = load_runs_multi_repo(data_repos, history_settings, args.as_of or None)
+    print(f"Data repos : {', '.join(repo['graphdb_repository'] for repo in data_repos)}")
+    print(f"Named graph: {history_settings['graph']}")
     print(
         f"Runs       : {snapshot['run_total']} recorded, "
-        f"{len(snapshot['selected'])} selected (latest per SHACL file)"
+        f"{len(snapshot['selected'])} selected (latest per data repo × SHACL file)"
     )
-    if snapshot["unresolved"]:
-        print(f"Unresolved : {snapshot['unresolved']} reports without any ex:file")
-    for shacl_file, run in sorted(snapshot["selected"].items()):
-        runs = len(snapshot["by_file"][shacl_file])
+    if snapshot["unresolved_total"]:
+        print(f"Unresolved : {snapshot['unresolved_total']} reports without any ex:file")
+    for (data_repo_id, shacl_file), run in sorted(snapshot["selected"].items()):
+        runs = len(snapshot["by_data_repo"][data_repo_id][shacl_file])
         flag = "ERROR" if run["execution_error"] else ("trunc" if run["truncated"] else "")
         delta = (
             f"{run['duration_delta']:+.3f}s" if run["duration_delta"] is not None else "—"
         )
         print(
-            f"  {shacl_file:<78} {run['finished_at']:<26} "
+            f"  [{data_repo_id}] {shacl_file:<70} {run['finished_at']:<26} "
             f"{run['duration'] if run['duration'] is not None else '?':>8}s "
             f"{delta:>10} "
             f"{len(run['results']):>6} results  {runs} run(s) {flag}"
