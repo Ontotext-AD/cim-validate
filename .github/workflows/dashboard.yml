@@ -9,7 +9,7 @@ name: Build dashboard
 on:
   push:
     branches:
-      - multi-repo
+      - main
   workflow_dispatch: {}
 
 permissions:
