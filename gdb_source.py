@@ -23,11 +23,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 import dashboard_config as dc
@@ -131,25 +133,160 @@ def history_config(config: dict | None = None) -> dict:
     return dc.history_settings(config)
 
 
-def sparql_select(endpoint: str, query: str, timeout: int = 300) -> list[dict]:
-    """POST a SELECT query and return its bindings."""
+# Process-wide GraphDB bearer token. None means this process is anonymous.
+_cached_auth: str | None = None
+_auth_resolved = False
+
+
+class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
+    """Keep the login password on the GraphDB host that received it."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise SystemExit(
+            f"GraphDB login redirected ({code}) to {newurl}. "
+            "Refusing to follow the redirect with credentials."
+        )
+
+
+def invalidate_authorization() -> None:
+    """Drop the cached token so the next query logs in again."""
+    global _cached_auth, _auth_resolved
+    _cached_auth = None
+    _auth_resolved = False
+
+
+def _header_safe(value: str, label: str) -> str:
+    if "\r" in value or "\n" in value:
+        raise SystemExit(f"{label} must not contain newlines.")
+    try:
+        value.encode("latin-1")
+    except UnicodeEncodeError:
+        raise SystemExit(
+            f"{label} contains characters the GraphDB login header cannot send."
+        ) from None
+    return value
+
+
+def _login(base_url: str, user: str, password: str) -> str:
+    """POST /rest/login and return the Authorization value GraphDB issued."""
+    url = f"{base_url.rstrip('/')}/rest/login/{quote(user, safe='')}"
     request = Request(
-        endpoint,
-        data=urlencode({"query": query}).encode(),
-        headers={
-            "Accept": "application/sparql-results+json",
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
+        url,
+        data=b"",
+        headers={"X-GraphDB-Password": _header_safe(password, "GDBPASS")},
         method="POST",
     )
+    opener = urllib.request.build_opener(_RefuseRedirect)
     try:
-        with urlopen(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode())
+        with opener.open(request, timeout=60) as response:
+            issued = response.headers.get("Authorization")
     except HTTPError as exc:
         detail = exc.read().decode(errors="replace")[:500]
-        raise SystemExit(f"GraphDB query failed: HTTP {exc.code}: {detail}") from exc
+        if password and password in detail:
+            detail = "(response omitted)"
+        raise SystemExit(
+            f"GraphDB login failed: HTTP {exc.code} from {url}: {detail}"
+        ) from exc
     except (URLError, TimeoutError, OSError) as exc:
-        raise SystemExit(f"GraphDB is unreachable at {endpoint}: {exc}") from exc
+        raise SystemExit(f"GraphDB login is unreachable at {url}: {exc}") from exc
+    if not issued or not issued.strip():
+        raise SystemExit(f"GraphDB login failed: no Authorization header from {url}")
+    token = issued.strip()
+    _header_safe(token, "GraphDB Authorization token")
+    print("GraphDB: authenticated for SPARQL reads.", file=sys.stderr)
+    return token
+
+
+def authorization_value() -> str | None:
+    """Bearer value for SPARQL, or None when no credentials were supplied.
+
+    ``GDBUSER`` and ``GDBPASS`` must both be set or both be empty. Empty values
+    keep the previous anonymous requests, so a local GraphDB with security
+    disabled still builds. The password is never read from ``dashboard-config.json``.
+    """
+    global _cached_auth, _auth_resolved
+    if _auth_resolved:
+        return _cached_auth
+    user = os.environ.get("GDBUSER", "").strip()
+    password = os.environ.get("GDBPASS", "")
+    if user == "" and password == "":
+        _auth_resolved = True
+        _cached_auth = None
+        return None
+    if user == "" or password == "":
+        raise SystemExit("GDBUSER and GDBPASS must both be set, or both be unset.")
+    _header_safe(user, "GDBUSER")
+    token = _login(history_config()["base_url"], user, password)
+    _cached_auth = token
+    _auth_resolved = True
+    return token
+
+
+def authorization_for(endpoint: str) -> str | None:
+    """Token to send to ``endpoint``, or None for an anonymous request.
+
+    The token is only attached when the query host is the same host that
+    issued it.
+    """
+    token = authorization_value()
+    if token is None:
+        return None
+    login_host = urlparse(history_config()["base_url"]).netloc
+    query_host = urlparse(endpoint).netloc
+    if not query_host or query_host != login_host:
+        raise SystemExit(
+            f"Refusing to send GraphDB credentials to {query_host or endpoint}; "
+            f"login host is {login_host}."
+        )
+    return token
+
+
+def redact_secret(text: str) -> str:
+    """Hide ``GDBPASS`` if a GraphDB error body echoes it."""
+    password = os.environ.get("GDBPASS", "")
+    if password and password in text:
+        return "(response omitted)"
+    return text
+
+
+def sparql_select(endpoint: str, query: str, timeout: int = 300) -> list[dict]:
+    """POST a SELECT query and return its bindings.
+
+    When ``GDBUSER`` and ``GDBPASS`` are set, the request carries the
+    Authorization value from ``/rest/login``. A 401 logs in once more and
+    retries. With neither variable set, the request stays anonymous.
+    """
+    payload = None
+    for attempt in range(2):
+        headers = {
+            "Accept": "application/sparql-results+json",
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+        auth = authorization_for(endpoint)
+        if auth:
+            headers["Authorization"] = auth
+        request = Request(
+            endpoint,
+            data=urlencode({"query": query}).encode(),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                payload = json.loads(response.read().decode())
+            break
+        except HTTPError as exc:
+            detail = redact_secret(exc.read().decode(errors="replace")[:500])
+            if exc.code == 401 and auth and attempt == 0:
+                invalidate_authorization()
+                continue
+            raise SystemExit(
+                f"GraphDB query failed: HTTP {exc.code}: {detail}"
+            ) from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            raise SystemExit(f"GraphDB is unreachable at {endpoint}: {exc}") from exc
+    if payload is None:
+        raise SystemExit(f"GraphDB query failed at {endpoint}")
     return payload.get("results", {}).get("bindings", [])
 
 

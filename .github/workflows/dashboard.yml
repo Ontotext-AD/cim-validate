@@ -1,10 +1,15 @@
 name: Build dashboard
 
-# Runs on the self-hosted runner installed on the GraphDB host. localhost:7200
-# there is the instance that holds the validation-history graph and the
-# relicapgrid data, so the build can read both. This does not rerun SHACL
-# validation. After a batch, start this workflow manually (workflow_dispatch)
-# to republish the pages from the graph.
+# Runs on the self-hosted runner installed on the GraphDB host. The build reads
+# the validation-history graph and the relicapgrid data at the URLs in
+# dashboard-config.json (https://cim.ontotext.com/graphdb/). This does not rerun
+# SHACL validation. After a batch, start this workflow manually
+# (workflow_dispatch) to republish the pages from the graph.
+#
+# SPARQL reads use repository secrets GDBUSER and GDBPASS, passed only into the
+# build step. Add both under Settings → Secrets and variables → Actions.
+# Leave dashboard-config.json free of credentials. Empty secrets keep the
+# requests anonymous.
 
 on:
   push:
@@ -84,6 +89,9 @@ jobs:
           
       - name: Build dashboard from GraphDB
         working-directory: relicap-ap-shacl-eval
+        env:
+          GDBUSER: ${{ secrets.GDBUSER }}
+          GDBPASS: ${{ secrets.GDBPASS }}
         run: python3 build_dashboard_gdb.py
 
       - name: Stage dashboard

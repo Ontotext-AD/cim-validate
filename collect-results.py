@@ -19,6 +19,7 @@ from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 import dashboard_config as dc
+import gdb_source
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -182,22 +183,38 @@ def iris_present_in_graphdb(iris: set[str], chunk: int = GDB_LOOKUP_CHUNK) -> se
             "  )\n"
             "}"
         )
-        req = Request(
-            GRAPHDB_SPARQL,
-            data=urlencode({"query": query}).encode(),
-            headers={
-                "Accept": "application/sparql-results+json",
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            method="POST",
-        )
         payload = None
         for attempt in range(2):
+            headers = {
+                "Accept": "application/sparql-results+json",
+                "Content-Type": "application/x-www-form-urlencoded",
+            }
+            auth = gdb_source.authorization_for(GRAPHDB_SPARQL)
+            if auth:
+                headers["Authorization"] = auth
+            req = Request(
+                GRAPHDB_SPARQL,
+                data=urlencode({"query": query}).encode(),
+                headers=headers,
+                method="POST",
+            )
             try:
                 with urlopen(req, timeout=120) as resp:
                     payload = json.loads(resp.read().decode())
                 break
-            except (URLError, HTTPError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+            except HTTPError as exc:
+                detail = gdb_source.redact_secret(exc.read().decode(errors="replace")[:500])
+                if exc.code == 401 and auth and attempt == 0:
+                    gdb_source.invalidate_authorization()
+                print(
+                    f"GraphDB presence lookup batch {n}/{total} failed: "
+                    f"HTTP {exc.code}: {detail}"
+                    + ("; retrying" if attempt == 0 else ""),
+                    file=sys.stderr,
+                )
+                if attempt == 0:
+                    time.sleep(0.25)
+            except (URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
                 if isinstance(exc, URLError) and isinstance(exc.reason, ConnectionRefusedError):
                     print(f"GraphDB presence lookup batch {n}/{total} failed: {exc}", file=sys.stderr)
                     print("GraphDB endpoint is unavailable; skipping remaining presence batches.", file=sys.stderr)

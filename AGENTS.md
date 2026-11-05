@@ -261,6 +261,12 @@ python3 build_dashboard_gdb.py --as-of 2026-09-20T00:00:00+03:00
 python3 gdb_source.py            # list the recorded runs without writing pages
 ```
 
+When GraphDB requires a login, export `GDBUSER` and `GDBPASS` in the
+environment first. Both must be set, or both left unset. The readers log in
+against `validation_history.base_url` and attach the returned token to history
+SPARQL and focus-node presence checks. Credentials are never read from
+`dashboard-config.json`.
+
 This rewrites `index.html` and `dashboard/` in place. Nothing else generates
 pages; there is no CSV step and no timing-history step.
 
@@ -463,7 +469,9 @@ When changing link behaviour, update both the implementation and the meta text o
 `.github/workflows/dashboard.yml` rebuilds the dashboard on the self-hosted
 runner, where the GraphDB history graph is reachable, then copies the generated
 `index.html` and `dashboard/` into `_site` alongside `dashboard.css` and deploys
-that copy to GitHub Pages. It does not rerun SHACL validation.
+that copy to GitHub Pages. It does not rerun SHACL validation. The
+`build-dashboard` job passes repository secrets `GDBUSER` and `GDBPASS` into
+that step only; `deploy-dashboard` does not receive them.
 
 `index.html` and `dashboard/` are git-ignored. Do not commit them. A published
 update is the workflow run, not a commit of generated pages.

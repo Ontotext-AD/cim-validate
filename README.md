@@ -95,6 +95,11 @@ Rebuilding the dashboard without revalidating is one command:
 python3 build_dashboard_gdb.py
 ```
 
+When GraphDB security is on, export the same `GDBUSER` and `GDBPASS` the batch
+script uses. The build logs in against `validation_history.base_url` and sends
+that token on history reads and focus-node presence checks. Leave both unset
+for an anonymous GraphDB. Neither value is read from `dashboard-config.json`.
+
 ## Layout
 
 ```
@@ -355,6 +360,11 @@ they read `dashboard-config.json` through `dashboard_config.history_settings()`.
 runner from the GraphDB history graph and publishes that copy. Those generated
 files are git-ignored. `dashboard.css` is the tracked stylesheet copied alongside
 them.
+
+The `build-dashboard` job passes repository secrets `GDBUSER` and `GDBPASS`
+into that step only. Create both under **Settings → Secrets and variables →
+Actions** on this repository. `deploy-dashboard` does not receive them, and
+they are not written into `dashboard-config.json`.
 
 Preview locally over HTTP (not `file://`, which blocks relative navigation):
 
