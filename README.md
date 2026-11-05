@@ -366,6 +366,13 @@ into that step only. Create both under **Settings → Secrets and variables →
 Actions** on this repository. `deploy-dashboard` does not receive them, and
 they are not written into `dashboard-config.json`.
 
+`.github/workflows/validate.yml` runs `./validate-all-and-write-to-gdb.sh` on
+the same runner. It starts on a daily schedule at 01:00 UTC and from **Run
+workflow**. A push does not start a batch. The script records and prunes the
+history graph, then this workflow starts **Build dashboard** so the public site
+is rebuilt from that graph. The scheduled run begins only after this file is on
+the repository's default branch.
+
 Preview locally over HTTP (not `file://`, which blocks relative navigation):
 
 ```bash

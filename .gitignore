@@ -1,6 +1,7 @@
 .DS_Store
 __pycache__/
 *.pyc
+.venv/
 
 # Retired file-based pipeline. Validation runs live in the GraphDB
 # validation-history graph; the only batch script is

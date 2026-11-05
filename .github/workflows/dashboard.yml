@@ -3,8 +3,8 @@ name: Build dashboard
 # Runs on the self-hosted runner installed on the GraphDB host. The build reads
 # the validation-history graph and the relicapgrid data at the URLs in
 # dashboard-config.json (https://cim.ontotext.com/graphdb/). This does not rerun
-# SHACL validation. After a batch, start this workflow manually
-# (workflow_dispatch) to republish the pages from the graph.
+# SHACL validation. validate.yml does that, and on success it starts this
+# workflow. workflow_dispatch republishes the current graph without a new batch.
 #
 # SPARQL reads use repository secrets GDBUSER and GDBPASS, passed only into the
 # build step. Add both under Settings → Secrets and variables → Actions.

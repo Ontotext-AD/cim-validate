@@ -7,7 +7,9 @@
 #      graph (write-validation-run-to-gdb.py) -- no report or timing files are
 #      written to disk;
 #   3. re-apply the retention window over the whole graph (gdb_history.py);
-#   4. rebuild the dashboard from that graph (build_dashboard_gdb.py).
+#   4. rebuild the dashboard from that graph (build_dashboard_gdb.py), unless
+#      SKIP_DASHBOARD_BUILD=1 (the GitHub validation workflow sets this and
+#      then starts the dashboard workflow, which publishes the pages).
 #
 # GraphDB URLs, repositories, the history named graph, and the SHACL file
 # list all come from dashboard-config.json. GDB_BASE_URL,
@@ -123,5 +125,11 @@ python3 "$SCRIPT_DIR/gdb_history.py" --auth-header "$AUTH_HEADER" 2>>"$LOG" | te
 
 # The dashboard is rebuilt from the graph, never from files, so this is the
 # only generation step: it rewrites index.html and dashboard/ in place.
-echo "[$(date -Iseconds)] GENERATING DASHBOARD FROM GRAPHDB" | tee -a "$LOG"
-python3 "$SCRIPT_DIR/build_dashboard_gdb.py" 2>>"$LOG" | tee -a "$LOG"
+# SKIP_DASHBOARD_BUILD=1 leaves that to .github/workflows/dashboard.yml, which
+# the validation workflow starts after a successful batch.
+if [[ "${SKIP_DASHBOARD_BUILD:-}" == "1" ]]; then
+  echo "[$(date -Iseconds)] Skipping dashboard build (SKIP_DASHBOARD_BUILD=1)" | tee -a "$LOG"
+else
+  echo "[$(date -Iseconds)] GENERATING DASHBOARD FROM GRAPHDB" | tee -a "$LOG"
+  python3 "$SCRIPT_DIR/build_dashboard_gdb.py" 2>>"$LOG" | tee -a "$LOG"
+fi
