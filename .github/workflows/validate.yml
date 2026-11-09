@@ -1,20 +1,9 @@
 name: Validate and write to GraphDB
 
-# Runs validate-all-and-write-to-gdb.sh on the self-hosted runner. The script
-# logs in with repository secrets GDBUSER and GDBPASS, validates every
-# configured SHACL file against relicapgrid, appends the runs to the history
-# graph, and prunes that graph. It does not publish pages. On success this
-# workflow starts "Build dashboard" (dashboard.yml), which reads the updated
-# graph and deploys. Set SKIP_DASHBOARD_BUILD so the shell script does not
-# generate pages that this job never uploads.
-#
-# Schedule is 01:00 UTC daily. GitHub runs a schedule only from the default
-# branch, and only while this file is on that branch. workflow_dispatch runs
-# the same job from the Actions tab. A push does not start a batch.
-#
-# The GraphDB account needs permission to call
-# POST /rest/repositories/relicapgrid/validate/file and to write the history
-# graph. Credentials stay in Actions secrets, not in dashboard-config.json.
+# Daily 01:00 UTC, and Actions → Run workflow. A push does not start a batch.
+# GitHub runs the schedule only from the default branch. On success this
+# starts Build dashboard on main. The runner Python has no pip, so the job
+# bootstraps one into a virtual environment.
 
 on:
   schedule:
@@ -53,52 +42,20 @@ jobs:
           ref: main
           path: NC-AP
 
-      # dashboard-config.json resolves ../CGMES-AP and ../NC-AP from this
-      # checkout, so those siblings must exist before the batch lists files.
-      - name: Check shape checkouts
-        working-directory: relicap-ap-shacl-eval
-        run: |
-          rm -rf ../application-profiles-library
-          python3 - <<'PY'
-          import dashboard_config as dc
-          config = dc.load_config()
-          missing = []
-          for repo in config["repositories"]:
-              path = repo["checkout_path"]
-              print(f"{repo['id']}: {repo['checkout']} -> {path}")
-              count = 0
-              for family in repo.get("families") or []:
-                  for directory in family.get("shacl_dirs") or []:
-                      files = list((path / directory).glob("*.ttl"))
-                      print(f"  {directory}: {len(files)} file(s)")
-                      count += len(files)
-              if count == 0:
-                  missing.append(f"{repo['id']} ({repo['checkout']} -> {path})")
-          if missing:
-              raise SystemExit(
-                  "No SHACL files in " + "; ".join(missing)
-                  + ". Expected siblings ../CGMES-AP and ../NC-AP of this checkout."
-              )
-          PY
-
-      - name: Install validation writer dependencies
-        working-directory: relicap-ap-shacl-eval
-        run: |
-          if python3 -m venv .venv; then
-            .venv/bin/pip install -r requirements.txt
-            echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
-          else
-            python3 -m pip install --user -r requirements.txt \
-              || python3 -m pip install --user --break-system-packages -r requirements.txt
-          fi
-
       - name: Validate and write runs to GraphDB
         working-directory: relicap-ap-shacl-eval
         env:
           GDBUSER: ${{ secrets.GDBUSER }}
           GDBPASS: ${{ secrets.GDBPASS }}
           SKIP_DASHBOARD_BUILD: "1"
-        run: ./validate-all-and-write-to-gdb.sh
+        run: |
+          test -n "$(python3 dashboard_config.py --list-shacl)"
+          rm -rf .venv
+          python3 -m venv --without-pip .venv
+          curl -sS https://bootstrap.pypa.io/get-pip.py | .venv/bin/python3
+          .venv/bin/python3 -m pip install -r requirements.txt
+          export PATH="$PWD/.venv/bin:$PATH"
+          ./validate-all-and-write-to-gdb.sh
 
       - name: Start dashboard publish
         env:
