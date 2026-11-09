@@ -2,8 +2,9 @@ name: Validate and write to GraphDB
 
 # Daily 12:00 UTC, and Actions → Run workflow. A push does not start a batch.
 # GitHub runs the schedule only from the default branch. On success this
-# starts Build dashboard on main. actions/setup-python supplies Python 3.12
-# and pip; the runner's python3 3.7 is not used.
+# starts Build dashboard on main. The runner is Debian 10, and
+# actions/setup-python has no build for that release, so the job downloads
+# the Ubuntu 18.04 CPython 3.10.3 package (glibc 2.27, which Debian 10 can run).
 
 on:
   schedule:
@@ -42,10 +43,23 @@ jobs:
           ref: main
           path: NC-AP
 
+      # setup-python matches `lsb_release` against actions/python-versions.
+      # Debian 10 is not in that manifest. This 3.10.3 build is the newest
+      # one there whose glibc requirement (2.27) Debian 10 satisfies.
+      # libpython's RUNPATH points at the GitHub-hosted toolcache, so this
+      # copy is found through LD_LIBRARY_PATH.
       - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+        run: |
+          root="${RUNNER_TOOL_CACHE:-$HOME/.cache}/Python/3.10.3/x64"
+          if [ ! -x "$root/bin/python3" ]; then
+            mkdir -p "$root"
+            curl -fsSL -o "$root/python.tgz" \
+              "https://github.com/actions/python-versions/releases/download/3.10.3-2000219088/python-3.10.3-linux-18.04-x64.tar.gz"
+            tar -xzf "$root/python.tgz" -C "$root"
+            rm -f "$root/python.tgz"
+          fi
+          echo "$root/bin" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=$root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
       - name: Install validation writer dependencies
         working-directory: relicap-ap-shacl-eval
