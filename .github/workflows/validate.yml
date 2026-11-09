@@ -2,9 +2,8 @@ name: Validate and write to GraphDB
 
 # Daily 12:00 UTC, and Actions → Run workflow. A push does not start a batch.
 # GitHub runs the schedule only from the default branch. On success this
-# starts Build dashboard on main. `python3` on the runner is 3.7, which cannot
-# install requirements.txt, so the job picks the first Python 3.10+ on PATH
-# and bootstraps pip into a virtual environment.
+# starts Build dashboard on main. actions/setup-python supplies Python 3.12
+# and pip; the runner's python3 3.7 is not used.
 
 on:
   schedule:
@@ -43,6 +42,15 @@ jobs:
           ref: main
           path: NC-AP
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install validation writer dependencies
+        working-directory: relicap-ap-shacl-eval
+        run: python3 -m pip install -r requirements.txt
+
       - name: Validate and write runs to GraphDB
         working-directory: relicap-ap-shacl-eval
         env:
@@ -50,27 +58,8 @@ jobs:
           GDBPASS: ${{ secrets.GDBPASS }}
           SKIP_DASHBOARD_BUILD: "1"
         run: |
-          PY=""
-          for candidate in python3.13 python3.12 python3.11 python3.10 python3; do
-            if command -v "$candidate" >/dev/null 2>&1 \
-              && "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'
-            then
-              PY=$candidate
-              break
-            fi
-          done
-          if [ -z "$PY" ]; then
-            echo "Python 3.10 or newer is required. python3 is $(python3 --version 2>&1)." >&2
-            echo "requirements.txt does not install on Python 3.7. Install python3.10 on the runner." >&2
-            exit 1
-          fi
-          echo "Using $PY ($("$PY" --version))"
-          test -n "$("$PY" dashboard_config.py --list-shacl)"
-          rm -rf .venv
-          "$PY" -m venv --without-pip .venv
-          curl -sS https://bootstrap.pypa.io/get-pip.py | .venv/bin/python3
-          .venv/bin/python3 -m pip install -r requirements.txt
-          export PATH="$PWD/.venv/bin:$PATH"
+          test -n "$(python3 dashboard_config.py --list-shacl)"
+          python3 --version
           ./validate-all-and-write-to-gdb.sh
 
       - name: Start dashboard publish

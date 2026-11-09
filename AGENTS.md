@@ -467,12 +467,13 @@ When changing link behaviour, update both the implementation and the meta text o
 ## CI
 
 `.github/workflows/validate.yml` runs `validate-all-and-write-to-gdb.sh` on the
-self-hosted runner. Triggers are a daily 01:00 UTC schedule and
-`workflow_dispatch`. It does not run on push. The job passes repository secrets
-`GDBUSER` and `GDBPASS`, sets `SKIP_DASHBOARD_BUILD=1`, and on success
-dispatches `.github/workflows/dashboard.yml` on `main`. Concurrency group
-`validate-shacl` does not cancel an in-progress batch. The schedule runs only
-from the default branch.
+self-hosted runner. Triggers are a daily 12:00 UTC schedule and
+`workflow_dispatch`. It does not run on push. `actions/setup-python` provides
+Python 3.12 for that job. The job passes repository secrets `GDBUSER` and
+`GDBPASS`, sets `SKIP_DASHBOARD_BUILD=1`, and on success dispatches
+`.github/workflows/dashboard.yml` on `main`. Concurrency group `validate-shacl`
+does not cancel an in-progress batch. The schedule runs only from the default
+branch.
 
 `.github/workflows/dashboard.yml` rebuilds the dashboard on the self-hosted
 runner, where the GraphDB history graph is reachable, then copies the generated
