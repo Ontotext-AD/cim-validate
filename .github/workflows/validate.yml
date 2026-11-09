@@ -2,8 +2,9 @@ name: Validate and write to GraphDB
 
 # Daily 12:00 UTC, and Actions → Run workflow. A push does not start a batch.
 # GitHub runs the schedule only from the default branch. On success this
-# starts Build dashboard on main. The runner Python has no pip, so the job
-# bootstraps one into a virtual environment.
+# starts Build dashboard on main. `python3` on the runner is 3.7, which cannot
+# install requirements.txt, so the job picks the first Python 3.10+ on PATH
+# and bootstraps pip into a virtual environment.
 
 on:
   schedule:
@@ -49,9 +50,24 @@ jobs:
           GDBPASS: ${{ secrets.GDBPASS }}
           SKIP_DASHBOARD_BUILD: "1"
         run: |
-          test -n "$(python3 dashboard_config.py --list-shacl)"
+          PY=""
+          for candidate in python3.13 python3.12 python3.11 python3.10 python3; do
+            if command -v "$candidate" >/dev/null 2>&1 \
+              && "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'
+            then
+              PY=$candidate
+              break
+            fi
+          done
+          if [ -z "$PY" ]; then
+            echo "Python 3.10 or newer is required. python3 is $(python3 --version 2>&1)." >&2
+            echo "requirements.txt does not install on Python 3.7. Install python3.10 on the runner." >&2
+            exit 1
+          fi
+          echo "Using $PY ($("$PY" --version))"
+          test -n "$("$PY" dashboard_config.py --list-shacl)"
           rm -rf .venv
-          python3 -m venv --without-pip .venv
+          "$PY" -m venv --without-pip .venv
           curl -sS https://bootstrap.pypa.io/get-pip.py | .venv/bin/python3
           .venv/bin/python3 -m pip install -r requirements.txt
           export PATH="$PWD/.venv/bin:$PATH"
