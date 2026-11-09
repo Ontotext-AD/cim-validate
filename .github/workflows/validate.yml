@@ -1,13 +1,13 @@
 name: Validate and write to GraphDB
 
-# Daily 14:00 UTC, and Actions → Run workflow. A push does not start a batch.
+# Daily 12:00 UTC, and Actions → Run workflow. A push does not start a batch.
 # GitHub runs the schedule only from the default branch. On success this
 # starts Build dashboard on main. The runner Python has no pip, so the job
 # bootstraps one into a virtual environment.
 
 on:
   schedule:
-    - cron: "0 14 * * *"
+    - cron: "0 12 * * *"
   workflow_dispatch: {}
 
 permissions:
