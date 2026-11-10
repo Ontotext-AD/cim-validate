@@ -10,6 +10,8 @@
 #   4. rebuild the dashboard from that graph (build_dashboard_gdb.py), unless
 #      SKIP_DASHBOARD_BUILD=1 (the GitHub validation workflow sets this and
 #      then starts the dashboard workflow, which publishes the pages).
+#      The script exits non-zero when any SHACL file failed, after that rebuild
+#      or skip, so the workflow does not publish a partial batch.
 #
 # GraphDB URLs, repositories, the history named graph, and the SHACL file
 # list all come from dashboard-config.json. GDB_BASE_URL,
@@ -88,6 +90,17 @@ while IFS= read -r file; do
     duration=$(python3 -c "print(f'{$end - $start:.3f}')")
     finished_at="$(date -Iseconds)"
 
+    if [[ "$http_code" != "200" ]]; then
+      body=""
+      if [[ -s "$tmp_report" ]]; then
+        body=$(head -c 500 "$tmp_report" || true)
+      fi
+      if [[ -n "${GDBPASS:-}" && -n "$body" ]]; then
+        body=${body//"$GDBPASS"/"(password omitted)"}
+      fi
+      printf '%s\n' "[$(date -Iseconds)] RESPONSE $name (HTTP $http_code): ${body:-"(empty response)"}" | tee -a "$LOG"
+    fi
+
     set +e
     py_out=$(python3 "$SCRIPT_DIR/write-validation-run-to-gdb.py" \
       --shacl-file "$file" \
@@ -132,4 +145,11 @@ if [[ "${SKIP_DASHBOARD_BUILD:-}" == "1" ]]; then
 else
   echo "[$(date -Iseconds)] GENERATING DASHBOARD FROM GRAPHDB" | tee -a "$LOG"
   python3 "$SCRIPT_DIR/build_dashboard_gdb.py" 2>>"$LOG" | tee -a "$LOG"
+fi
+
+# Every file was attempted. A non-zero count keeps the workflow from publishing
+# the dashboard over a partial or refused batch.
+if [[ "$fail_count" -gt 0 ]]; then
+  echo "[$(date -Iseconds)] Batch finished with $fail_count failed file(s)" | tee -a "$LOG"
+  exit 1
 fi
