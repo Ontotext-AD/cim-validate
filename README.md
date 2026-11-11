@@ -95,6 +95,11 @@ Rebuilding the dashboard without revalidating is one command:
 python3 build_dashboard_gdb.py
 ```
 
+When GraphDB security is on, export the same `GDBUSER` and `GDBPASS` the batch
+script uses. The build logs in against `validation_history.base_url` and sends
+that token on history reads and focus-node presence checks. Leave both unset
+for an anonymous GraphDB. Neither value is read from `dashboard-config.json`.
+
 ## Layout
 
 ```
@@ -354,6 +359,20 @@ they read `dashboard-config.json` through `dashboard_config.history_settings()`.
 runner from the GraphDB history graph and publishes that copy. Those generated
 files are git-ignored. `dashboard.css` is the tracked stylesheet copied alongside
 them.
+
+The `build-dashboard` job passes repository secrets `GDBUSER` and `GDBPASS`
+into that step only. Create both under **Settings → Secrets and variables →
+Actions** on this repository. `deploy-dashboard` does not receive them, and
+they are not written into `dashboard-config.json`.
+
+`.github/workflows/validate.yml` runs `./validate-all-and-write-to-gdb.sh` on
+the same runner, using the CPython 3.10.3 build for Ubuntu 18.04 because this
+runner is Debian 10 and `actions/setup-python` has no build for it. It starts
+on a daily schedule at 12:00 UTC and from **Run workflow**. A push does not
+start a batch. The script records and prunes the history graph, then this
+workflow starts **Build dashboard** so the public site is rebuilt from that
+graph. The scheduled run begins only after this file is on the repository's
+default branch.
 
 Preview locally over HTTP (not `file://`, which blocks relative navigation):
 

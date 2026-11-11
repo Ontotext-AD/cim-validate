@@ -19,6 +19,7 @@ from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 import dashboard_config as dc
+import gdb_source
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -37,19 +38,11 @@ SHACL_SOURCES = [
     for subpath in family.get("shacl_dirs") or []
 ]
 
-_DATA_REPOS = {repo["id"]: repo for repo in dc.data_repositories_settings(CONFIG)}
-_DATA = dc.data_settings(CONFIG)  # first data repo; module constants stay backward-compatible
+_DATA = dc.data_settings(CONFIG)
 GRAPHDB_RESOURCE = _DATA["graphdb_resource"]
 GRAPHDB_REPO = _DATA["graphdb_repository"]
 GRAPHDB_SPARQL = _DATA["graphdb_sparql"]
 GDB_LOOKUP_CHUNK = 100
-
-
-def data_repo_settings(data_repository_id: str = "") -> dict:
-    """Resolve GraphDB link/SPARQL settings for one data repository."""
-    if data_repository_id and data_repository_id in _DATA_REPOS:
-        return _DATA_REPOS[data_repository_id]
-    return _DATA
 
 # Prefixes used only to shorten URIs for display.
 DISPLAY_PREFIXES = {
@@ -155,19 +148,13 @@ def strip_literal(term: str | None) -> str:
     return term
 
 
-def graphdb_link(
-    focus_term: str | None,
-    data_repository_id: str = "",
-) -> tuple[str, str]:
-    """Return (display, href) for a focus node in the given data repository."""
+def graphdb_link(focus_term: str | None) -> tuple[str, str]:
+    """Return (display, href) for a focus node."""
     iri = strip_brackets(focus_term)
     if iri is None:
         return (shorten(focus_term), "")
-    data = data_repo_settings(data_repository_id)
-    href = (
-        f"{data['graphdb_resource']}?uri={quote(iri, safe=':/')}"
-        f"&repositoryId={data['graphdb_repository']}&role=all"
-    )
+    href = (f"{GRAPHDB_RESOURCE}?uri={quote(iri, safe=':/')}"
+            f"&repositoryId={GRAPHDB_REPO}&role=all")
     return (iri, href)
 
 
@@ -175,14 +162,8 @@ def _sparql_iri(iri: str) -> str:
     return "<" + iri.replace("\\", "\\\\").replace(">", "\\>") + ">"
 
 
-def iris_present_in_graphdb(
-    iris: set[str],
-    chunk: int = GDB_LOOKUP_CHUNK,
-    data_repository_id: str = "",
-    sparql: str = "",
-) -> set[str]:
-    """Return the subset of IRIs that appear in one data repository."""
-    endpoint = sparql or data_repo_settings(data_repository_id)["graphdb_sparql"]
+def iris_present_in_graphdb(iris: set[str], chunk: int = GDB_LOOKUP_CHUNK) -> set[str]:
+    """Return the subset of IRIs that appear in the configured data repository."""
     found: set[str] = set()
     ordered = [i for i in iris if i and not i.startswith("_:")]
     if not ordered:
@@ -202,22 +183,38 @@ def iris_present_in_graphdb(
             "  )\n"
             "}"
         )
-        req = Request(
-            endpoint,
-            data=urlencode({"query": query}).encode(),
-            headers={
-                "Accept": "application/sparql-results+json",
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            method="POST",
-        )
         payload = None
         for attempt in range(2):
+            headers = {
+                "Accept": "application/sparql-results+json",
+                "Content-Type": "application/x-www-form-urlencoded",
+            }
+            auth = gdb_source.authorization_for(GRAPHDB_SPARQL)
+            if auth:
+                headers["Authorization"] = auth
+            req = Request(
+                GRAPHDB_SPARQL,
+                data=urlencode({"query": query}).encode(),
+                headers=headers,
+                method="POST",
+            )
             try:
                 with urlopen(req, timeout=120) as resp:
                     payload = json.loads(resp.read().decode())
                 break
-            except (URLError, HTTPError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+            except HTTPError as exc:
+                detail = gdb_source.redact_secret(exc.read().decode(errors="replace")[:500])
+                if exc.code == 401 and auth and attempt == 0:
+                    gdb_source.invalidate_authorization()
+                print(
+                    f"GraphDB presence lookup batch {n}/{total} failed: "
+                    f"HTTP {exc.code}: {detail}"
+                    + ("; retrying" if attempt == 0 else ""),
+                    file=sys.stderr,
+                )
+                if attempt == 0:
+                    time.sleep(0.25)
+            except (URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
                 if isinstance(exc, URLError) and isinstance(exc.reason, ConnectionRefusedError):
                     print(f"GraphDB presence lookup batch {n}/{total} failed: {exc}", file=sys.stderr)
                     print("GraphDB endpoint is unavailable; skipping remaining presence batches.", file=sys.stderr)
@@ -237,14 +234,7 @@ def iris_present_in_graphdb(
                     f"Splitting failed GraphDB batch {n}/{total} into chunks of {split_size}.",
                     file=sys.stderr,
                 )
-                found.update(
-                    iris_present_in_graphdb(
-                        set(batch),
-                        chunk=split_size,
-                        data_repository_id=data_repository_id,
-                        sparql=endpoint,
-                    )
-                )
+                found.update(iris_present_in_graphdb(set(batch), chunk=split_size))
             continue
         for binding in payload.get("results", {}).get("bindings", []):
             val = binding.get("iri", {}).get("value")
