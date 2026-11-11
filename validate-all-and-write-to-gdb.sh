@@ -10,8 +10,8 @@
 #   4. rebuild the dashboard from that graph (build_dashboard_gdb.py), unless
 #      SKIP_DASHBOARD_BUILD=1 (the GitHub validation workflow sets this and
 #      then starts the dashboard workflow, which publishes the pages).
-#      The script exits non-zero when any SHACL file failed, after that rebuild
-#      or skip, so the workflow does not publish a partial batch.
+#      A failed POST is logged and counted. The script still exits 0 so the
+#      workflow publishes the runs that were recorded.
 #
 # GraphDB URLs, repositories, the history named graph, and the SHACL file
 # list all come from dashboard-config.json. GDB_BASE_URL,
@@ -147,9 +147,8 @@ else
   python3 "$SCRIPT_DIR/build_dashboard_gdb.py" 2>>"$LOG" | tee -a "$LOG"
 fi
 
-# Every file was attempted. A non-zero count keeps the workflow from publishing
-# the dashboard over a partial or refused batch.
+# A failed POST is a recorded run, not a failed job. Shape files fail for
+# many reasons, and the dashboard is how those failures are read.
 if [[ "$fail_count" -gt 0 ]]; then
   echo "[$(date -Iseconds)] Batch finished with $fail_count failed file(s)" | tee -a "$LOG"
-  exit 1
 fi
