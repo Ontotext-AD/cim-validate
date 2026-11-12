@@ -4,45 +4,21 @@
       "id": "relicapgrid",
       "title": "ReliCapGrid",
       "graphdb_repository": "relicapgrid",
-      "graphdb_resource": "http://localhost:7200/resource",
-      "graphdb_sparql": "http://localhost:7200/repositories/relicapgrid",
+      "graphdb_resource": "https://cim.ontotext.com/graphdb/resource",
+      "graphdb_sparql": "https://cim.ontotext.com/graphdb/repositories/relicapgrid",
       "instance_github_repository": "entsoe/relicapgrid"
     },
     {
       "id": "realgrid10",
       "title": "RealGridx10",
       "graphdb_repository": "realgrid10",
-      "graphdb_resource": "http://localhost:7200/resource",
-      "graphdb_sparql": "http://localhost:7200/repositories/realgrid10",
+      "graphdb_resource": "https://cim.ontotext.com/graphdb/resource",
+      "graphdb_sparql": "https://cim.ontotext.com/graphdb/repositories/realgrid10",
       "instance_github_repository": "entsoe/relicapgrid"
-   },
-    {
-      "id": "realgrid20",
-      "title": "RealGridx20",
-      "graphdb_repository": "realgrid20",
-      "graphdb_resource": "http://localhost:7200/resource",
-      "graphdb_sparql": "http://localhost:7200/repositories/realgrid20",
-      "instance_github_repository": "entsoe/relicapgrid"
-   },
-    {
-      "id": "realgrid50",
-      "title": "RealGridx50",
-      "graphdb_repository": "realgrid50",
-      "graphdb_resource": "http://localhost:7200/resource",
-      "graphdb_sparql": "http://localhost:7200/repositories/realgrid50",
-      "instance_github_repository": "entsoe/relicapgrid"
-    },   
-    {
-      "id": "realgrid100",
-      "title": "RealGridx100",
-      "graphdb_repository": "realgrid100",
-      "graphdb_resource": "http://localhost:7200/resource",
-      "graphdb_sparql": "http://localhost:7200/repositories/realgrid100",
-      "instance_github_repository": "entsoe/relicapgrid"
-    }
+   }
   ],
   "validation_history": {
-    "base_url": "http://localhost:7200/",
+    "base_url": "https://cim.ontotext.com/graphdb/",
     "graph": "https://github.com/entsoe/application-profiles/SHACL/reports_multi",
     "index": "index.html",
     "dashboard_dir": "dashboard",

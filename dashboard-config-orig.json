@@ -1,0 +1,105 @@
+{
+  "data_repositories": [
+    {
+      "id": "relicapgrid",
+      "title": "ReliCapGrid",
+      "graphdb_repository": "relicapgrid",
+      "graphdb_resource": "http://localhost:7200/resource",
+      "graphdb_sparql": "http://localhost:7200/repositories/relicapgrid",
+      "instance_github_repository": "entsoe/relicapgrid"
+    },
+    {
+      "id": "realgrid10",
+      "title": "RealGridx10",
+      "graphdb_repository": "realgrid10",
+      "graphdb_resource": "http://localhost:7200/resource",
+      "graphdb_sparql": "http://localhost:7200/repositories/realgrid10",
+      "instance_github_repository": "entsoe/relicapgrid"
+   },
+    {
+      "id": "realgrid20",
+      "title": "RealGridx20",
+      "graphdb_repository": "realgrid20",
+      "graphdb_resource": "http://localhost:7200/resource",
+      "graphdb_sparql": "http://localhost:7200/repositories/realgrid20",
+      "instance_github_repository": "entsoe/relicapgrid"
+   },
+    {
+      "id": "realgrid50",
+      "title": "RealGridx50",
+      "graphdb_repository": "realgrid50",
+      "graphdb_resource": "http://localhost:7200/resource",
+      "graphdb_sparql": "http://localhost:7200/repositories/realgrid50",
+      "instance_github_repository": "entsoe/relicapgrid"
+    },   
+    {
+      "id": "realgrid100",
+      "title": "RealGridx100",
+      "graphdb_repository": "realgrid100",
+      "graphdb_resource": "http://localhost:7200/resource",
+      "graphdb_sparql": "http://localhost:7200/repositories/realgrid100",
+      "instance_github_repository": "entsoe/relicapgrid"
+    }
+  ],
+  "validation_history": {
+    "base_url": "http://localhost:7200/",
+    "graph": "https://github.com/entsoe/application-profiles/SHACL/reports_multi",
+    "index": "index.html",
+    "dashboard_dir": "dashboard",
+    "keep_timings": 2,
+    "keep_results": 1
+  },
+  "repositories": [
+    {
+      "id": "cgmes-ap",
+      "title": "CGMES Application Profiles",
+      "checkout": "../CGMES-AP",
+      "github_repository": "entsoe/CGMES-AP",
+      "github_ref": "main",
+      "families": [
+        {
+          "id": "CGMES",
+          "title": "CGMES",
+          "shacl_dirs": [
+            "CGMES/CurrentRelease/SHACL",
+            "CGMES/SHACL"
+          ],
+          "rdfs_dirs": [
+            "CGMES/CurrentRelease/RDFS",
+            "CGMES/RDFS",
+            "CGMES/RDFS_Beta_501_Ed2_CD"
+          ],
+          "prof_dirs": [
+            "CGMES/PROF"
+          ],
+          "profile_overrides": {}
+        }
+      ]
+    },
+    {
+      "id": "nc-ap",
+      "title": "Network Code Application Profiles",
+      "checkout": "../NC-AP",
+      "github_repository": "entsoe/NC-AP",
+      "github_ref": "main",
+      "families": [
+        {
+          "id": "NCP",
+          "title": "NCP",
+          "shacl_dirs": [
+            "NCP/CurrentRelease/SHACL",
+            "NCP/SHACL"
+          ],
+          "rdfs_dirs": [
+            "NCP/CurrentRelease/RDFS",
+            "NCP/RDFS"
+          ],
+          "prof_dirs": [
+            "NCP/PROF"
+          ],
+          "profile_overrides": {}
+        }
+      ]
+    }
+  ]
+}
