@@ -1,14 +1,14 @@
 name: Validate and write to GraphDB
 
-# Daily 12:00 UTC, and Actions → Run workflow. A push does not start a batch.
-# GitHub runs the schedule only from the default branch. On success this
-# starts Build dashboard on main. The runner is Debian 10, and
-# actions/setup-python has no build for that release, so the job downloads
-# the Ubuntu 18.04 CPython 3.10.3 package (glibc 2.27, which Debian 10 can run).
+# Actions → Run workflow runs this file on the branch selected in the UI.
+# The daily 12:00 UTC start is schedule-validate.yml on the default branch,
+# which dispatches this workflow at ref multi-repo. A push does not start a
+# batch. On success this starts Build dashboard on multi-repo. The runner is
+# Debian 10, and actions/setup-python has no build for that release, so the
+# job downloads the Ubuntu 18.04 CPython 3.10.3 package (glibc 2.27, which
+# Debian 10 can run).
 
 on:
-  schedule:
-    - cron: "0 12 * * *"
   workflow_dispatch: {}
 
 permissions:

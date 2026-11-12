@@ -39,10 +39,17 @@ SHACL_SOURCES = [
 ]
 
 _DATA = dc.data_settings(CONFIG)
-GRAPHDB_RESOURCE = _DATA["graphdb_resource"]
-GRAPHDB_REPO = _DATA["graphdb_repository"]
-GRAPHDB_SPARQL = _DATA["graphdb_sparql"]
+_DATA_REPOS = {
+    repo["id"]: repo for repo in dc.data_repositories_settings(CONFIG)
+}
 GDB_LOOKUP_CHUNK = 100
+
+
+def _data_repo(data_repository_id: str = "") -> dict:
+    """Settings for one configured data repository, or the first when omitted."""
+    if data_repository_id and data_repository_id in _DATA_REPOS:
+        return _DATA_REPOS[data_repository_id]
+    return _DATA
 
 # Prefixes used only to shorten URIs for display.
 DISPLAY_PREFIXES = {
@@ -148,13 +155,14 @@ def strip_literal(term: str | None) -> str:
     return term
 
 
-def graphdb_link(focus_term: str | None) -> tuple[str, str]:
-    """Return (display, href) for a focus node."""
+def graphdb_link(focus_term: str | None, data_repository_id: str = "") -> tuple[str, str]:
+    """Return (display, href) for a focus node in the repository that was validated."""
     iri = strip_brackets(focus_term)
     if iri is None:
         return (shorten(focus_term), "")
-    href = (f"{GRAPHDB_RESOURCE}?uri={quote(iri, safe=':/')}"
-            f"&repositoryId={GRAPHDB_REPO}&role=all")
+    repo = _data_repo(data_repository_id)
+    href = (f"{repo['graphdb_resource']}?uri={quote(iri, safe=':/')}"
+            f"&repositoryId={repo['graphdb_repository']}&role=all")
     return (iri, href)
 
 
@@ -162,8 +170,14 @@ def _sparql_iri(iri: str) -> str:
     return "<" + iri.replace("\\", "\\\\").replace(">", "\\>") + ">"
 
 
-def iris_present_in_graphdb(iris: set[str], chunk: int = GDB_LOOKUP_CHUNK) -> set[str]:
-    """Return the subset of IRIs that appear in the configured data repository."""
+def iris_present_in_graphdb(
+    iris: set[str],
+    chunk: int = GDB_LOOKUP_CHUNK,
+    data_repository_id: str = "",
+) -> set[str]:
+    """Return the subset of IRIs that appear in the named data repository."""
+    repo = _data_repo(data_repository_id)
+    sparql = repo["graphdb_sparql"]
     found: set[str] = set()
     ordered = [i for i in iris if i and not i.startswith("_:")]
     if not ordered:
@@ -189,11 +203,11 @@ def iris_present_in_graphdb(iris: set[str], chunk: int = GDB_LOOKUP_CHUNK) -> se
                 "Accept": "application/sparql-results+json",
                 "Content-Type": "application/x-www-form-urlencoded",
             }
-            auth = gdb_source.authorization_for(GRAPHDB_SPARQL)
+            auth = gdb_source.authorization_for(sparql)
             if auth:
                 headers["Authorization"] = auth
             req = Request(
-                GRAPHDB_SPARQL,
+                sparql,
                 data=urlencode({"query": query}).encode(),
                 headers=headers,
                 method="POST",
@@ -234,7 +248,11 @@ def iris_present_in_graphdb(iris: set[str], chunk: int = GDB_LOOKUP_CHUNK) -> se
                     f"Splitting failed GraphDB batch {n}/{total} into chunks of {split_size}.",
                     file=sys.stderr,
                 )
-                found.update(iris_present_in_graphdb(set(batch), chunk=split_size))
+                found.update(iris_present_in_graphdb(
+                    set(batch),
+                    chunk=split_size,
+                    data_repository_id=data_repository_id,
+                ))
             continue
         for binding in payload.get("results", {}).get("bindings", []):
             val = binding.get("iri", {}).get("value")

@@ -367,12 +367,13 @@ they are not written into `dashboard-config.json`.
 
 `.github/workflows/validate.yml` runs `./validate-all-and-write-to-gdb.sh` on
 the same runner, using the CPython 3.10.3 build for Ubuntu 18.04 because this
-runner is Debian 10 and `actions/setup-python` has no build for it. It starts
-on a daily schedule at 12:00 UTC and from **Run workflow**. A push does not
-start a batch. The script records and prunes the history graph, then this
-workflow starts **Build dashboard** so the public site is rebuilt from that
-graph. The scheduled run begins only after this file is on the repository's
-default branch.
+runner is Debian 10 and `actions/setup-python` has no build for it. **Run
+workflow** starts the file on the branch selected in the UI. A push does not
+start a batch. The daily run at 4:00 UTC is
+`.github/workflows/schedule-validate.yml` on the default branch, which
+dispatches this workflow at ref `multi-repo`. The script records and prunes
+the history graph, then this workflow starts **Build dashboard** on
+`multi-repo`.
 
 Preview locally over HTTP (not `file://`, which blocks relative navigation):
 

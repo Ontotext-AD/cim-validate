@@ -474,15 +474,16 @@ When changing link behaviour, update both the implementation and the meta text o
 
 ## CI
 
-`.github/workflows/validate.yml` runs `validate-all-and-write-to-gdb.sh` on the
-self-hosted runner. Triggers are a daily 12:00 UTC schedule and
-`workflow_dispatch`. It does not run on push. The runner is Debian 10, which
-`actions/setup-python` cannot supply, so the job downloads CPython 3.10.3
-built for Ubuntu 18.04. The job passes repository secrets `GDBUSER` and
-`GDBPASS`, sets `SKIP_DASHBOARD_BUILD=1`, and on success dispatches
-`.github/workflows/dashboard.yml` on `main`. Concurrency group `validate-shacl`
-does not cancel an in-progress batch. The schedule runs only from the default
-branch.
+`.github/workflows/schedule-validate.yml` is the daily 4:00 UTC trigger.
+GitHub runs a schedule only from the default branch, so the copy on the
+default branch is the one that fires. Its only step dispatches `validate.yml`
+with `ref: multi-repo`. `validate.yml` is `workflow_dispatch` only. It runs
+`validate-all-and-write-to-gdb.sh` on the self-hosted runner and does not run
+on push. The runner is Debian 10, which `actions/setup-python` cannot supply,
+so the job downloads CPython 3.10.3 built for Ubuntu 18.04. The job passes
+repository secrets `GDBUSER` and `GDBPASS`, sets `SKIP_DASHBOARD_BUILD=1`, and
+on success dispatches `.github/workflows/dashboard.yml` on `multi-repo`.
+Concurrency group `validate-shacl` does not cancel an in-progress batch.
 
 `.github/workflows/dashboard.yml` rebuilds the dashboard on the self-hosted
 runner, where the GraphDB history graph is reachable, then copies the generated
