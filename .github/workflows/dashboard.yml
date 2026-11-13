@@ -1,19 +1,15 @@
 name: Build dashboard
 
-# Runs on the self-hosted runner installed on the GraphDB host. The build reads
-# the validation-history graph and the data repositories at the URLs in
-# dashboard-config.json. This does not rerun SHACL validation. validate.yml
-# does that, and on success it starts this workflow. workflow_dispatch
-# republishes the current graph without a new batch.
+# Builds on GitHub-hosted ubuntu-latest against the public GraphDB URL in
+# dashboard-config.json (https://cim.ontotext.com/graphdb/). This does not
+# rerun SHACL validation — validate.yml does that on the self-hosted runner.
+# On success, or via workflow_dispatch, the staged site is published to GitHub
+# Pages on this repository (https://ontotext-ad.github.io/cim-validate/).
 #
 # SPARQL reads use repository secrets GDBUSER and GDBPASS, passed only into the
 # build step. Add both under Settings → Secrets and variables → Actions.
 # Leave dashboard-config.json free of credentials. Empty secrets keep the
-# requests anonymous.
-#
-# The staged _site/ is published to GitHub Pages on this repository
-# (https://ontotext-ad.github.io/cim-validate/). The repo must be public on the
-# org free plan for Pages to be available.
+# requests anonymous. The repo must be public on the org free plan for Pages.
 
 on:
   push:
@@ -32,7 +28,7 @@ concurrency:
 
 jobs:
   build-dashboard:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout evaluation results
         uses: actions/checkout@v5
@@ -53,14 +49,16 @@ jobs:
           ref: main
           path: NC-AP
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
       # The eval repo is checked out into relicap-ap-shacl-eval/, so
       # dashboard-config.json's ../CGMES-AP and ../NC-AP are these siblings.
-      # A previous job left application-profiles-library here; that checkout
-      # has no SHACL files unless its submodules are fetched.
       - name: Check shape checkouts
         working-directory: relicap-ap-shacl-eval
         run: |
-          rm -rf ../application-profiles-library
           python3 - <<'PY'
           import dashboard_config as dc
           config = dc.load_config()
@@ -82,16 +80,6 @@ jobs:
                   + ". Expected siblings ../CGMES-AP and ../NC-AP of this checkout."
               )
           PY
-
-      - name: Debug network reachability
-        run: |
-          echo "--- localhost ---"
-          curl -v http://localhost:7200/rest/repositories || true
-          echo "--- public URL ---"
-          curl -v https://cim.ontotext.com/graphdb/rest/repositories || true
-          echo "--- what am I ---"
-          cat /proc/1/cgroup 2>/dev/null | head -5 || true
-          hostname
 
       - name: Build dashboard from GraphDB
         working-directory: relicap-ap-shacl-eval

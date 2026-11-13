@@ -485,15 +485,15 @@ repository secrets `GDBUSER` and `GDBPASS`, sets `SKIP_DASHBOARD_BUILD=1`, and
 on success dispatches `.github/workflows/dashboard.yml` on `main`.
 Concurrency group `validate-shacl` does not cancel an in-progress batch.
 
-`.github/workflows/dashboard.yml` rebuilds the dashboard on the self-hosted
-runner, where the GraphDB history graph is reachable, then copies the generated
-`index.html` and `dashboard/` into `_site` alongside `dashboard.css` and deploys
-that copy to GitHub Pages on this repository
-(`https://ontotext-ad.github.io/cim-validate/`) via `actions/deploy-pages`.
-It does not rerun SHACL validation. The `build-dashboard` job passes
-repository secrets `GDBUSER` and `GDBPASS` into that step only;
-`deploy-dashboard` does not receive them. On the org free plan the repository
-must be public for Pages to work.
+`.github/workflows/dashboard.yml` rebuilds the dashboard on
+`ubuntu-latest` against the public GraphDB URL in `dashboard-config.json`,
+then copies the generated `index.html` and `dashboard/` into `_site`
+alongside `dashboard.css` and deploys that copy to GitHub Pages on this
+repository (`https://ontotext-ad.github.io/cim-validate/`) via
+`actions/deploy-pages`. It does not rerun SHACL validation. The
+`build-dashboard` job passes repository secrets `GDBUSER` and `GDBPASS`
+into that step only; `deploy-dashboard` does not receive them. On the org
+free plan the repository must be public for Pages to work.
 
 `index.html` and `dashboard/` are git-ignored. Do not commit them. A published
 update is the workflow run, not a commit of generated pages.

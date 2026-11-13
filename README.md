@@ -355,12 +355,14 @@ they read `dashboard-config.json` through `dashboard_config.history_settings()`.
 
 ## Publishing
 
-`.github/workflows/dashboard.yml` rebuilds `index.html` and `dashboard/` on the
-runner from the GraphDB history graph and publishes that copy to GitHub Pages at
+`.github/workflows/dashboard.yml` rebuilds `index.html` and `dashboard/` on
+GitHub-hosted `ubuntu-latest` from the GraphDB history graph (public URL in
+`dashboard-config.json`) and publishes that copy to GitHub Pages at
 [ontotext-ad.github.io/cim-validate](https://ontotext-ad.github.io/cim-validate/).
 Those generated files are git-ignored. `dashboard.css` is the tracked stylesheet
 copied alongside them. On the org free plan the repository must stay **public**
-for Pages to be available.
+for Pages to be available. Validation stays on the self-hosted runner;
+only the dashboard publish uses hosted runners.
 
 The `build-dashboard` job passes repository secrets `GDBUSER` and `GDBPASS`
 into that step only. Create both under **Settings → Secrets and variables →
