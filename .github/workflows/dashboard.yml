@@ -10,15 +10,21 @@ name: Build dashboard
 # build step. Add both under Settings → Secrets and variables → Actions.
 # Leave dashboard-config.json free of credentials. Empty secrets keep the
 # requests anonymous.
+#
+# The staged _site/ is published to GitHub Pages on this repository
+# (https://ontotext-ad.github.io/cim-validate/). The repo must be public on the
+# org free plan for Pages to be available.
 
 on:
   push:
     branches:
-      - multi-repo
+      - main
   workflow_dispatch: {}
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
 
 concurrency:
   group: github-pages
@@ -86,7 +92,7 @@ jobs:
           echo "--- what am I ---"
           cat /proc/1/cgroup 2>/dev/null | head -5 || true
           hostname
-          
+
       - name: Build dashboard from GraphDB
         working-directory: relicap-ap-shacl-eval
         env:
@@ -102,32 +108,18 @@ jobs:
           cp relicap-ap-shacl-eval/dashboard.css _site/
           cp -R relicap-ap-shacl-eval/dashboard _site/
 
-      - name: Upload dashboard site
-        uses: actions/upload-artifact@v4
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          name: site
           path: _site
 
   deploy-dashboard:
     needs: build-dashboard
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Checkout private source
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Download dashboard site
-        uses: actions/download-artifact@v4
-        with:
-          name: site
-          path: _site
-
-      - name: Deploy static files to public repo
-        uses: JamesIves/github-pages-deploy-action@v4
-        with:
-          token: ${{ secrets.PUBLIC_REPO_TOKEN }}
-          repository-name: nataschake/relicap-ap-shacl-eval-public
-          branch: main
-          folder: _site
-          clean: true
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

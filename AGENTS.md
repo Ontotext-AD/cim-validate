@@ -477,20 +477,23 @@ When changing link behaviour, update both the implementation and the meta text o
 `.github/workflows/schedule-validate.yml` is the daily 4:00 UTC trigger.
 GitHub runs a schedule only from the default branch, so the copy on the
 default branch is the one that fires. Its only step dispatches `validate.yml`
-with `ref: multi-repo`. `validate.yml` is `workflow_dispatch` only. It runs
+with `ref: main`. `validate.yml` is `workflow_dispatch` only. It runs
 `validate-all-and-write-to-gdb.sh` on the self-hosted runner and does not run
 on push. The runner is Debian 10, which `actions/setup-python` cannot supply,
 so the job downloads CPython 3.10.3 built for Ubuntu 18.04. The job passes
 repository secrets `GDBUSER` and `GDBPASS`, sets `SKIP_DASHBOARD_BUILD=1`, and
-on success dispatches `.github/workflows/dashboard.yml` on `multi-repo`.
+on success dispatches `.github/workflows/dashboard.yml` on `main`.
 Concurrency group `validate-shacl` does not cancel an in-progress batch.
 
 `.github/workflows/dashboard.yml` rebuilds the dashboard on the self-hosted
 runner, where the GraphDB history graph is reachable, then copies the generated
 `index.html` and `dashboard/` into `_site` alongside `dashboard.css` and deploys
-that copy to GitHub Pages. It does not rerun SHACL validation. The
-`build-dashboard` job passes repository secrets `GDBUSER` and `GDBPASS` into
-that step only; `deploy-dashboard` does not receive them.
+that copy to GitHub Pages on this repository
+(`https://ontotext-ad.github.io/cim-validate/`) via `actions/deploy-pages`.
+It does not rerun SHACL validation. The `build-dashboard` job passes
+repository secrets `GDBUSER` and `GDBPASS` into that step only;
+`deploy-dashboard` does not receive them. On the org free plan the repository
+must be public for Pages to work.
 
 `index.html` and `dashboard/` are git-ignored. Do not commit them. A published
 update is the workflow run, not a commit of generated pages.

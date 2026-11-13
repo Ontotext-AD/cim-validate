@@ -5,7 +5,7 @@ and NCP (Network Code Profiles) Application-Profiles shapes. Every validation
 run is recorded in a GraphDB named graph, and the latest run of each SHACL file
 is rendered as a browsable static dashboard.
 
-**[View the dashboard →](https://nataschake.github.io/relicap-ap-shacl-eval/)**
+**[View the dashboard →](https://ontotext-ad.github.io/cim-validate/)**
 
 ## Links
 
@@ -13,7 +13,7 @@ is rendered as a browsable static dashboard.
 - **Data** — [`entsoe/relicapgrid`](https://github.com/entsoe/relicapgrid),
   loaded into the GraphDB repository
   [`relicapgrid` on a local GraphDB instance](http://localhost:7200/).
-- **Results** — [dashboard on GitHub Pages](https://nataschake.github.io/relicap-ap-shacl-eval/), with family matrices, timings, and focus-node drill-down pages.
+- **Results** — [dashboard on GitHub Pages](https://ontotext-ad.github.io/cim-validate/), with family matrices, timings, and focus-node drill-down pages.
 
 ## One pipeline
 
@@ -356,9 +356,11 @@ they read `dashboard-config.json` through `dashboard_config.history_settings()`.
 ## Publishing
 
 `.github/workflows/dashboard.yml` rebuilds `index.html` and `dashboard/` on the
-runner from the GraphDB history graph and publishes that copy. Those generated
-files are git-ignored. `dashboard.css` is the tracked stylesheet copied alongside
-them.
+runner from the GraphDB history graph and publishes that copy to GitHub Pages at
+[ontotext-ad.github.io/cim-validate](https://ontotext-ad.github.io/cim-validate/).
+Those generated files are git-ignored. `dashboard.css` is the tracked stylesheet
+copied alongside them. On the org free plan the repository must stay **public**
+for Pages to be available.
 
 The `build-dashboard` job passes repository secrets `GDBUSER` and `GDBPASS`
 into that step only. Create both under **Settings → Secrets and variables →
@@ -371,9 +373,9 @@ runner is Debian 10 and `actions/setup-python` has no build for it. **Run
 workflow** starts the file on the branch selected in the UI. A push does not
 start a batch. The daily run at 4:00 UTC is
 `.github/workflows/schedule-validate.yml` on the default branch, which
-dispatches this workflow at ref `multi-repo`. The script records and prunes
+dispatches this workflow at ref `main`. The script records and prunes
 the history graph, then this workflow starts **Build dashboard** on
-`multi-repo`.
+`main`.
 
 Preview locally over HTTP (not `file://`, which blocks relative navigation):
 
